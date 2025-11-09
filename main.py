@@ -15,10 +15,10 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 # --- Configuration ---
 # *** IMPORTANT: REPLACE THESE WITH YOUR ACTUAL VALUES ***
-BOT_TOKEN = "YOUR_XEWEE_BOT_TOKEN"  # Get this from @BotFather
+BOT_TOKEN = "8085121840:AAHGpim6s0j8FU8yZ5jSiyu6Ol51Rdgod8E"  # Get this from @BotFather
 BOT_USERNAME = "XeweeBot"             # Your bot's @username (without the @)
 ADMIN_CHAT_ID = 7588209802         # Your Super Admin Telegram User ID
-MINI_APP_URL = "https://your-xewee-frontend.vercel.app/" # Your Vercel frontend URL
+MINI_APP_URL = "8273728-app-frontend-seven.vercel.app" # Your Vercel frontend URL
 # ------------------------------------
 
 # --- Xewee Feature Constants ---
