@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-python-telegram-bot~=20.0
+python-telegram-bot==20.8 # Explicitly use a stable 20.x version
 sqlalchemy
 psycopg2-binary # For PostgreSQL on Railway
 python-multipart # For file uploads in FastAPI
