@@ -1,8 +1,7 @@
 fastapi
 uvicorn
 python-telegram-bot==20.8
-psycopg2-binary
-python-multipartersion
 sqlalchemy
-psycopg2-binary # For PostgreSQL on Railway
+psycopg2-binary
+python-multipart  # <-- This is the corrected linereSQL on Railway
 python-multipart # For file uploads in FastAPI
