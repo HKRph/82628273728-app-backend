@@ -2,7 +2,7 @@ import logging, json, uvicorn, os, base64, random
 from io import BytesIO
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
-from typing import Optional
+from typing import Optional, Tuple
 from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, InputFile
@@ -10,15 +10,15 @@ from telegram.ext import (
     Application, CommandHandler, ContextTypes, ConversationHandler,
     MessageHandler, filters, CallbackQueryHandler
 )
-from sqlalchemy import create_engine, Column, Integer, BigInteger, String, Float, ForeignKey, Text, Date
+from sqlalchemy import create_engine, Column, Integer, BigInteger, String, Float, ForeignKey, Text, Date, or_
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 # --- Configuration ---
 # *** IMPORTANT: REPLACE THESE WITH YOUR ACTUAL VALUES ***
 BOT_TOKEN = "8085121840:AAHGpim6s0j8FU8yZ5jSiyu6Ol51Rdgod8E"  # Get this from @BotFather
 BOT_USERNAME = "XeweeBot"             # Your bot's @username (without the @)
-ADMIN_CHAT_IDS = (6780778947, 7588209802) # Your Super Admin Telegram User IDs (can be multiple)
-MINI_APP_URL = "https://82628273728-app-frontend-seven.vercel.app/" # Your Vercel frontend URL - *** REMEMBER TO UPDATE THIS! ***
+ADMIN_CHAT_IDS: Tuple[int, ...] = (7588209802, 6780778947) # Your Super Admin Telegram User IDs (can be multiple)
+MINI_APP_URL = "https://your-xewee-frontend.vercel.app" # Your Vercel frontend URL - *** REMEMBER TO UPDATE THIS! ***
 # ------------------------------------
 
 # --- Xewee Feature Constants ---
@@ -76,6 +76,7 @@ class TaskSubmission(Base):
     text_proof = Column(Text)
     photo_proof_base64 = Column(Text)
     status = Column(String, default="pending") # pending, approved, rejected
+    rejection_reason = Column(Text, nullable=True) # Added for more detail
     created_at = Column(Date, default=date.today())
 
 class Withdrawal(Base):
@@ -87,6 +88,7 @@ class Withdrawal(Base):
     method = Column(String)
     details = Column(String)
     status = Column(String, default="pending") # pending, approved, rejected
+    rejection_reason = Column(Text, nullable=True) # Added for more detail
     created_at = Column(Date, default=date.today())
 
 class RedeemCode(Base):
@@ -110,7 +112,10 @@ engine = create_engine(DATABASE_URL); Base.metadata.create_all(engine); Session 
 
 # --- Conversation States (Explicitly Defined) ---
 # These are used by python-telegram-bot's ConversationHandler
-TASK_DESC, TASK_LINK, TASK_REWARD, REJECT_REASON_WD, BROADCAST_MESSAGE, ANNOUNCEMENT_TEXT, NEW_CODE_CODE, NEW_CODE_REWARD, NEW_CODE_USES, USER_MGT_ID, USER_MGT_ACTION, USER_MGT_DURATION, RAIN_AMOUNT, RAIN_USERS, SUBMIT_TASK_REJECT_REASON, DELETE_TASK, DELETE_CODE, WARN_USER_ID, WARN_REASON = range(19)
+TASK_DESC, TASK_LINK, TASK_REWARD, REJECT_REASON_WD, BROADCAST_MESSAGE, ANNOUNCEMENT_TEXT, \
+NEW_CODE_CODE, NEW_CODE_REWARD, NEW_CODE_USES, USER_MGT_ID, USER_MGT_ACTION, USER_MGT_DURATION, \
+RAIN_AMOUNT, RAIN_USERS, SUBMIT_TASK_REJECT_REASON, DELETE_TASK, DELETE_CODE, WARN_USER_ID, \
+WARN_REASON, USER_SEARCH_INPUT, ADJUST_BALANCE_ID, ADJUST_BALANCE_AMOUNT, ADJUST_BALANCE_CONFIRM = range(24)
 
 
 # --- Bot & API Lifespan ---
@@ -121,8 +126,7 @@ async def lifespan(app: FastAPI):
     logger.info("Lifespan startup...")
     await ptb_app.initialize()
     # For production, set a webhook URL for your FastAPI application.
-    # Example: await ptb_app.bot.set_webhook(url=os.getenv("WEBHOOK_URL", MINI_APP_URL + "webhook"))
-    # For simpler Railway deployments or local testing without a public URL, polling is easier.
+    # For Railway, polling is often simpler for this type of bot.
     await ptb_app.updater.start_polling(drop_pending_updates=True) # Drop old updates on startup
     await ptb_app.start()
     logger.info("Telegram bot has started successfully.")
@@ -156,9 +160,7 @@ async def get_initial_data(request: Request):
         
         user_db = db_session.query(User).filter(User.id == user_id).first()
         if not user_db: 
-            # If user not found, create them. Default first_name to 'Unknown' if not available.
-            # The 'start' command in the bot will update the first_name properly.
-            user_db = User(id=user_id, first_name='Unknown')
+            user_db = User(id=user_id, first_name='Unknown') # Default first_name, will be updated on /start
             db_session.add(user_db); db_session.commit()
             logger.info(f"New user {user_id} created via get_initial_data.")
         
@@ -216,6 +218,69 @@ async def get_initial_data(request: Request):
         logger.error(f"API Error in get_initial_data for user {user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@app.post("/get_notifications")
+async def get_notifications(request: Request):
+    try:
+        data = await request.json(); user_id = data.get('user_id')
+        if not user_id: 
+            raise HTTPException(status_code=400, detail="user_id not provided")
+        
+        user_db = db_session.query(User).filter(User.id == user_id).first()
+        if not user_db:
+            raise HTTPException(status_code=404, detail="User not found.")
+
+        notifications = []
+
+        # Fetch Task Submissions
+        task_submissions = db_session.query(TaskSubmission).filter(
+            TaskSubmission.user_id == user_id,
+            TaskSubmission.status != 'pending' # Only show approved/rejected
+        ).order_by(TaskSubmission.created_at.desc()).all()
+
+        for sub in task_submissions:
+            task = db_session.query(Task).filter(Task.id == sub.task_id).first()
+            if task:
+                notifications.append({
+                    "type": "task_submission",
+                    "id": sub.id,
+                    "description": task.description,
+                    "reward": task.reward,
+                    "status": sub.status,
+                    "reason": sub.rejection_reason,
+                    "date": sub.created_at.strftime('%Y-%m-%d')
+                })
+
+        # Fetch Withdrawals
+        withdrawals = db_session.query(Withdrawal).filter(
+            Withdrawal.user_id == user_id,
+            Withdrawal.status != 'pending' # Only show approved/rejected
+        ).order_by(Withdrawal.created_at.desc()).all()
+
+        for wd in withdrawals:
+            notifications.append({
+                "type": "withdrawal",
+                "id": wd.id,
+                "amount": wd.amount,
+                "method": wd.method,
+                "status": wd.status,
+                "reason": wd.rejection_reason,
+                "date": wd.created_at.strftime('%Y-%m-%d')
+            })
+        
+        # Sort all notifications by date (most recent first)
+        notifications.sort(key=lambda x: x['date'], reverse=True)
+
+        return notifications
+
+    except HTTPException as he:
+        db_session.rollback()
+        raise he
+    except Exception as e:
+        db_session.rollback()
+        logger.error(f"API Error in get_notifications for user {user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @app.post("/submit_task_proof")
 async def submit_task_proof(request: Request):
     try:
@@ -251,8 +316,16 @@ async def submit_task_proof(request: Request):
         else:
             task_description = task.description
             task_reward = task.reward
+        
+        # Get user's first name and username for admin notification
+        user_info_for_admin = f"{user_db.first_name} (`{user_db.id}`)"
+        # Note: Telegram user objects from initDataUnsafe might not always have 'username'
+        # To get username reliably, a bot interaction often works best.
+        # For this, we'll try to get it from the User DB if it was saved from a /start command.
+        # Or, we could pass it from frontend if available in initDataUnsafe.
+        # For now, let's keep it simple with first_name and ID.
 
-        caption = f"**New Task Submission for Review**\n\n- User ID: `{user_id}`\n- Task: {task_description}\n- Reward: ₱{task_reward:.2f}\n- Note: {text}"
+        caption = f"**New Task Submission for Review**\n\n- User: {user_info_for_admin}\n- Task: {task_description}\n- Reward: ₱{task_reward:.2f}\n- Note: {text}"
         keyboard = [[InlineKeyboardButton("Approve ✅", callback_data=f"approve_sub_{submission.id}"), InlineKeyboardButton("Reject ❌", callback_data=f"reject_sub_start_{submission.id}")]]
         
         # Decode photo and send to admin
@@ -287,10 +360,13 @@ async def redeem_code(request: Request):
         if not code or (code.uses_left != -1 and code.uses_left <= 0):
             raise HTTPException(status_code=400, detail="Invalid or expired code.")
 
-        # Check if user has already used this specific code (for limited use codes)
-        # This basic implementation doesn't track unique user usage per code,
-        # only overall uses_left. For unique user usage, a separate table would be needed.
-        # For this scope, we assume one-time use per user is not enforced, only total uses.
+        # Basic check: if code is single-use and uses_left is 1, then prevent multiple uses by same user.
+        # For more robust unique user usage, a separate table to track user-code redemptions is needed.
+        if code.uses_left == 1:
+            # We need a way to track if this specific user has used this specific code before.
+            # This current setup only tracks overall uses_left.
+            # For simplicity, we'll assume a single-use code is for ANY single use, not per user.
+            pass # Keep current behavior
 
         user_db.balance += code.reward
         if code.uses_left != -1: 
@@ -363,7 +439,13 @@ async def submit_withdrawal(request: Request):
         new_withdrawal = Withdrawal(user_id=user_db.id, amount=amount, fee=fee, method=method, details=details, created_at=date.today())
         db_session.add(new_withdrawal); user_db.balance -= total_deduction; db_session.commit()
         await ptb_app.bot.send_message(user_id, f"✅ Your withdrawal request for ₱{amount:.2f} (Fee: ₱{fee:.2f}) has been submitted! Our team will review it shortly.")
-        admin_message = f"**New Withdrawal Request**\n\n- User ID: `{user_db.id}`\n- Amount: `₱{amount:.2f}`\n- Fee: `₱{fee:.2f}`\n- Method: `{method}`\n- Details: `{details}`\n\n**Action: /admin**"
+        
+        # Get user's first name and username for admin notification
+        user_tg_obj = await ptb_app.bot.get_chat(user_id) # Fetch actual Telegram user object
+        username_str = f" (@{user_tg_obj.username})" if user_tg_obj.username else ""
+        user_info_for_admin = f"{user_db.first_name or user_tg_obj.first_name} (`{user_db.id}`){username_str}"
+
+        admin_message = f"**New Withdrawal Request**\n\n- User: {user_info_for_admin}\n- Amount: `₱{amount:.2f}`\n- Fee: `₱{fee:.2f}`\n- Method: `{method}`\n- Details: `{details}`\n\n**Action: /admin**"
         keyboard = [[InlineKeyboardButton("Approve ✅", callback_data=f"approve_wd_{new_withdrawal.id}"), InlineKeyboardButton("Reject ❌", callback_data=f"reject_wd_start_{new_withdrawal.id}")]]
         for admin_id in ADMIN_CHAT_IDS:
             try:
@@ -504,8 +586,9 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📊 User Stats", callback_data="admin_stats"), InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast")],
         [InlineKeyboardButton("📜 Set Announcement", callback_data="admin_set_announcement"), InlineKeyboardButton("📝 Manage Tasks", callback_data="admin_manage_tasks")],
         [InlineKeyboardButton("🔑 Manage Codes", callback_data="admin_manage_codes"), InlineKeyboardButton("🔨 User Management", callback_data="admin_user_mgt")],
+        [InlineKeyboardButton("🔍 User Search", callback_data="admin_user_search"), InlineKeyboardButton("💰 Adjust Balance", callback_data="admin_adjust_balance")], # New buttons
         [InlineKeyboardButton("🌧️ Rain Prize", callback_data="admin_rain"), InlineKeyboardButton("🧐 Review Submissions", callback_data="admin_pending_submissions")],
-        [InlineKeyboardButton("⚙️ Maintenance Mode", callback_data="admin_maintenance")],
+        [InlineKeyboardButton("⚙️ Withdrawal Maintenance", callback_data="admin_maintenance")],
         [InlineKeyboardButton("⚠️ Warn User", callback_data="admin_warn_user")]
     ]
     await update.message.reply_text("👑 **Xewee Admin Dashboard**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -518,8 +601,9 @@ async def admin_main_menu_callback(update: Update, context: ContextTypes.DEFAULT
         [InlineKeyboardButton("📊 User Stats", callback_data="admin_stats"), InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast")],
         [InlineKeyboardButton("📜 Set Announcement", callback_data="admin_set_announcement"), InlineKeyboardButton("📝 Manage Tasks", callback_data="admin_manage_tasks")],
         [InlineKeyboardButton("🔑 Manage Codes", callback_data="admin_manage_codes"), InlineKeyboardButton("🔨 User Management", callback_data="admin_user_mgt")],
+        [InlineKeyboardButton("🔍 User Search", callback_data="admin_user_search"), InlineKeyboardButton("💰 Adjust Balance", callback_data="admin_adjust_balance")],
         [InlineKeyboardButton("🌧️ Rain Prize", callback_data="admin_rain"), InlineKeyboardButton("🧐 Review Submissions", callback_data="admin_pending_submissions")],
-        [InlineKeyboardButton("⚙️ Maintenance Mode", callback_data="admin_maintenance")],
+        [InlineKeyboardButton("⚙️ Withdrawal Maintenance", callback_data="admin_maintenance")],
         [InlineKeyboardButton("⚠️ Warn User", callback_data="admin_warn_user")]
     ]
     await query.message.edit_text("👑 **Xewee Admin Dashboard**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -591,20 +675,26 @@ async def set_announcement_text(update: Update, context: ContextTypes.DEFAULT_TY
     if not announcement: 
         announcement = SystemInfo(key='announcement')
     
-    if update.message.text.lower() == '/clear': 
-        if announcement.value: # Only delete if there was an announcement
-            db_session.delete(announcement)
-            await update.message.reply_text("Announcement cleared.")
-            logger.info(f"Admin {update.effective_user.id} cleared announcement.")
-        else:
-            await update.message.reply_text("No announcement to clear.")
-    else: 
-        announcement.value = update.message.text
-        db_session.add(announcement)
-        await update.message.reply_text("Announcement set.")
-        logger.info(f"Admin {update.effective_user.id} set announcement: {update.message.text[:50]}...")
-    
-    db_session.commit()
+    try:
+        if update.message.text.lower() == '/clear': 
+            if announcement.value: # Only delete if there was an announcement
+                db_session.delete(announcement)
+                await update.message.reply_text("Announcement cleared.")
+                logger.info(f"Admin {update.effective_user.id} cleared announcement.")
+            else:
+                await update.message.reply_text("No announcement to clear.")
+        else: 
+            announcement.value = update.message.text
+            db_session.add(announcement)
+            await update.message.reply_text("Announcement set.")
+            logger.info(f"Admin {update.effective_user.id} set announcement: {update.message.text[:50]}...")
+        
+        db_session.commit()
+    except Exception as e:
+        db_session.rollback()
+        logger.error(f"Error setting/clearing announcement: {e}")
+        await update.message.reply_text("An error occurred while setting/clearing the announcement.")
+
     return ConversationHandler.END
 
 # --- Manage Tasks ---
@@ -656,6 +746,12 @@ async def get_task_reward(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError: 
         await update.message.reply_text("Invalid amount. Please enter a number (e.g., 50.00):"); 
         return TASK_REWARD
+    except Exception as e:
+        db_session.rollback()
+        logger.error(f"Error adding task: {e}")
+        await update.message.reply_text("An error occurred while adding the task.")
+        return ConversationHandler.END
+
 
 async def remove_task_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer(); 
@@ -677,11 +773,16 @@ async def delete_task_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     task_id = int(query.data.split("_")[2]); 
     task = db_session.query(Task).filter(Task.id == task_id).first()
     if task: 
-        db_session.delete(task); 
-        db_session.commit(); 
-        await query.answer("Task removed!", show_alert=True); 
-        logger.info(f"Admin {query.from_user.id} deleted task {task_id}.")
-        await remove_task_list(update, context) # Refresh list
+        try:
+            db_session.delete(task); db_session.commit(); 
+            await query.answer("Task removed!", show_alert=True); 
+            logger.info(f"Admin {query.from_user.id} deleted task {task_id}.")
+            await remove_task_list(update, context) # Refresh list
+        except Exception as e:
+            db_session.rollback()
+            logger.error(f"Error deleting task {task_id}: {e}")
+            await query.answer("An error occurred while deleting the task.", show_alert=True)
+            await remove_task_list(update, context)
     else: 
         await query.answer("Task not found.", show_alert=True)
         await remove_task_list(update, context) # Refresh list in case it was already deleted
@@ -743,6 +844,11 @@ async def get_new_code_uses(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError: 
         await update.message.reply_text("Invalid uses. Please enter an integer (e.g., 5, or -1):"); 
         return NEW_CODE_USES
+    except Exception as e:
+        db_session.rollback()
+        logger.error(f"Error adding redeem code: {e}")
+        await update.message.reply_text("An error occurred while adding the redeem code.")
+        return ConversationHandler.END
 
 async def remove_code_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer(); 
@@ -764,11 +870,17 @@ async def delete_code_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     code_id = int(query.data.split("_")[2]); 
     code = db_session.query(RedeemCode).filter(RedeemCode.id == code_id).first()
     if code: 
-        db_session.delete(code); 
-        db_session.commit(); 
-        await query.answer("Code removed!", show_alert=True); 
-        logger.info(f"Admin {query.from_user.id} deleted redeem code {code.code}.")
-        await remove_code_list(update, context) # Refresh list
+        try:
+            db_session.delete(code); 
+            db_session.commit(); 
+            await query.answer("Code removed!", show_alert=True); 
+            logger.info(f"Admin {query.from_user.id} deleted redeem code {code.code}.")
+            await remove_code_list(update, context) # Refresh list
+        except Exception as e:
+            db_session.rollback()
+            logger.error(f"Error deleting redeem code {code.id}: {e}")
+            await query.answer("An error occurred while deleting the code.", show_alert=True)
+            await remove_code_list(update, context)
     else: 
         await query.answer("Code not found.", show_alert=True)
         await remove_code_list(update, context) # Refresh list
@@ -864,6 +976,141 @@ async def user_mgt_duration_input(update: Update, context: ContextTypes.DEFAULT_
 
     return ConversationHandler.END
 
+# --- User Search ---
+async def user_search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query; await query.answer()
+    if query.from_user.id not in ADMIN_CHAT_IDS: return
+    await query.message.reply_text("Send the User ID or Telegram Username to search (e.g., 123456789 or @username).\n\nTo cancel, send /cancel.");
+    return USER_SEARCH_INPUT
+
+async def user_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_CHAT_IDS: return
+    search_query = update.message.text.strip()
+    
+    user_db = None
+    try:
+        # Try to search by ID first
+        user_id = int(search_query)
+        user_db = db_session.query(User).filter(User.id == user_id).first()
+    except ValueError:
+        # If not an ID, try searching by username (requires fetching user from Telegram API)
+        if search_query.startswith('@'):
+            username = search_query[1:]
+        else:
+            username = search_query # Assume it's a username without '@'
+        
+        # This is a bit tricky as User table doesn't store Telegram username.
+        # We need to query Telegram API directly to get user ID from username,
+        # then search our DB. But getting chat by username is rate-limited/requires permissions.
+        # For simplicity, if not found by ID, we'll mark as "not found."
+        # A more robust solution would involve storing username in DB.
+        
+        # For now, let's just log if it's a username search and fail.
+        logger.warning(f"User search for '{search_query}' (non-ID) failed. Usernames are not directly searchable in DB.")
+    
+    if user_db:
+        user_tg_obj = None
+        try:
+            # Try to get live Telegram user object for up-to-date username/first_name
+            user_tg_obj = await ptb_app.bot.get_chat(user_db.id)
+        except Exception as e:
+            logger.warning(f"Could not fetch live Telegram user object for {user_db.id}: {e}")
+
+        username_display = f"@{user_tg_obj.username}" if user_tg_obj and user_tg_obj.username else "N/A"
+        first_name_display = user_db.first_name or (user_tg_obj.first_name if user_tg_obj else "Unknown")
+        referrer_info = f"Referred by: `{user_db.referrer_id}`" if user_db.referrer_id else "No referrer"
+
+        user_info_msg = (
+            f"**User Found!**\n\n"
+            f"- Name: {first_name_display}\n"
+            f"- ID: `{user_db.id}`\n"
+            f"- Username: {username_display}\n"
+            f"- Status: `{user_db.status.upper()}`{' (until ' + user_db.status_until.strftime('%b %d') + ')' if user_db.status_until and user_db.status == 'restricted' else ''}\n"
+            f"- Balance: ₱{user_db.balance:.2f}\n"
+            f"- Gift Tickets: {user_db.gift_tickets}\n"
+            f"- Tasks Completed: {user_db.tasks_completed}\n"
+            f"- Total Referrals: {user_db.referral_count}\n"
+            f"- Successful Referrals: {user_db.successful_referrals}\n"
+            f"- {referrer_info}\n"
+        )
+        await update.message.reply_text(user_info_msg, parse_mode='Markdown')
+    else:
+        await update.message.reply_text(f"User '{search_query}' not found.")
+    
+    return ConversationHandler.END
+
+
+# --- Adjust Balance ---
+async def adjust_balance_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query; await query.answer()
+    if query.from_user.id not in ADMIN_CHAT_IDS: return
+    await query.message.reply_text("Send the User ID to adjust balance for:\n\nTo cancel, send /cancel.");
+    return ADJUST_BALANCE_ID
+
+async def get_adjust_balance_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_CHAT_IDS: return
+    try:
+        user_id = int(update.message.text)
+        user_db = db_session.query(User).filter(User.id == user_id).first()
+        if not user_db:
+            await update.message.reply_text("User not found. Please enter a valid User ID:");
+            return ADJUST_BALANCE_ID
+        context.user_data['adjust_user_id'] = user_id
+        await update.message.reply_text(f"Current balance for {user_db.first_name} (`{user_db.id}`): ₱{user_db.balance:.2f}\n\nEnter amount to adjust (e.g., 100.00 to add, -50.00 to subtract):\n\nTo cancel, send /cancel.");
+        return ADJUST_BALANCE_AMOUNT
+    except ValueError:
+        await update.message.reply_text("Invalid User ID. Please enter a numerical ID:");
+        return ADJUST_BALANCE_ID
+
+async def get_adjust_balance_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_CHAT_IDS: return
+    try:
+        amount = float(update.message.text)
+        context.user_data['adjust_amount'] = amount
+        user_id = context.user_data['adjust_user_id']
+        user_db = db_session.query(User).filter(User.id == user_id).first()
+        
+        action = "add" if amount >= 0 else "subtract"
+        confirmation_msg = (
+            f"Confirm balance adjustment for {user_db.first_name} (`{user_db.id}`):\n"
+            f"Action: {action.capitalize()} ₱{abs(amount):.2f}\n"
+            f"Current Balance: ₱{user_db.balance:.2f}\n"
+            f"New Balance: ₱{(user_db.balance + amount):.2f}\n\n"
+            f"Reply 'yes' to confirm or /cancel to abort."
+        )
+        await update.message.reply_text(confirmation_msg, parse_mode='Markdown')
+        return ADJUST_BALANCE_CONFIRM
+    except ValueError:
+        await update.message.reply_text("Invalid amount. Please enter a number (e.g., 100.00 or -50.00):");
+        return ADJUST_BALANCE_AMOUNT
+
+async def confirm_adjust_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_CHAT_IDS: return
+    
+    if update.message.text.lower() == 'yes':
+        user_id = context.user_data['adjust_user_id']
+        amount = context.user_data['adjust_amount']
+        user_db = db_session.query(User).filter(User.id == user_id).first()
+        
+        if user_db:
+            try:
+                user_db.balance += amount
+                db_session.commit()
+                await update.message.reply_text(f"✅ Balance adjusted for {user_db.first_name} (`{user_db.id}`). New balance: ₱{user_db.balance:.2f}")
+                await ptb_app.bot.send_message(user_id, f"💰 Your Xewee balance has been adjusted by an admin by ₱{amount:.2f}. New balance: ₱{user_db.balance:.2f}")
+                logger.info(f"Admin {update.effective_user.id} adjusted balance for user {user_id} by {amount:.2f}.")
+            except Exception as e:
+                db_session.rollback()
+                logger.error(f"Error adjusting balance for user {user_id}: {e}")
+                await update.message.reply_text("An error occurred while adjusting balance.")
+        else:
+            await update.message.reply_text("User not found during confirmation. Balance not adjusted.")
+    else:
+        await update.message.reply_text("Balance adjustment cancelled.")
+    
+    return ConversationHandler.END
+
+
 # --- Rain Prize ---
 async def rain_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer(); 
@@ -920,47 +1167,71 @@ async def rain_users_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- Review Submissions ---
 async def review_submissions(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query; await query.answer()
-    if query.from_user.id not in ADMIN_CHAT_IDS: return
+    # This handler can be called by a callback_query or from another function.
+    # If it's a callback_query, we need to answer it.
+    if update.callback_query:
+        query = update.callback_query; await query.answer()
+        if query.from_user.id not in ADMIN_CHAT_IDS: return
+        message_to_edit = query.message
+    else: # Called internally, e.g., after approving/rejecting a submission
+        message_to_edit = context.user_data.get('admin_submission_message') # Get the original message object to edit
 
     submission = db_session.query(TaskSubmission).filter(TaskSubmission.status == 'pending').first()
     if not submission: 
-        await query.message.edit_text("No pending submissions to review.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]])); 
+        if message_to_edit:
+            await message_to_edit.edit_text("No pending submissions to review.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]))
+        else:
+            await context.bot.send_message(update.effective_chat.id, "No pending submissions to review.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]))
         return
     
     user_db = db_session.query(User).filter(User.id == submission.user_id).first() 
     task = db_session.query(Task).filter(Task.id == submission.task_id).first()
     
     if not user_db or not task:
-        # If user or task is missing, mark submission as an error and continue to next
         logger.error(f"Review Submission: User ({submission.user_id}) or task ({submission.task_id}) not found for submission ID {submission.id}. Marking as rejected.")
         submission.status = 'rejected'; db_session.commit()
-        await query.message.reply_text(f"Skipping submission {submission.id}: Associated user or task not found. Checking next...")
-        # Recursively call to get the next submission
-        await review_submissions(update, context) 
+        if message_to_edit:
+            await message_to_edit.edit_text(f"Skipping submission {submission.id}: Associated user or task not found. Checking next...", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Next Submission", callback_data="admin_pending_submissions")]]))
+        else:
+            await context.bot.send_message(update.effective_chat.id, f"Skipping submission {submission.id}: Associated user or task not found. Checking next...", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Next Submission", callback_data="admin_pending_submissions")]]))
+        await review_submissions(update, context) # Recursively call to get the next submission
         return
 
-    caption = f"**Submission Review (ID: {submission.id})**\n\n- User: {user_db.first_name} (`{user_db.id}`)\n- Task: {task.description}\n- Reward: ₱{task.reward:.2f}\n- Note: {submission.text_proof}\n\nSubmitted on: {submission.created_at.strftime('%Y-%m-%d')}"
+    # Fetch live Telegram user object for up-to-date username/first_name
+    user_tg_obj = None
+    try:
+        user_tg_obj = await ptb_app.bot.get_chat(user_db.id)
+    except Exception as e:
+        logger.warning(f"Could not fetch live Telegram user object for {user_db.id}: {e}")
+
+    username_display = f"@{user_tg_obj.username}" if user_tg_obj and user_tg_obj.username else "N/A"
+    first_name_display = user_db.first_name or (user_tg_obj.first_name if user_tg_obj else "Unknown")
+    
+    caption = f"**Submission Review (ID: {submission.id})**\n\n- User: {first_name_display} (`{user_db.id}`){f' {username_display}' if username_display != 'N/A' else ''}\n- Task: {task.description}\n- Reward: ₱{task.reward:.2f}\n- Note: {submission.text_proof}\n\nSubmitted on: {submission.created_at.strftime('%Y-%m-%d')}"
     keyboard = [[InlineKeyboardButton("Approve ✅", callback_data=f"approve_sub_{submission.id}"), InlineKeyboardButton("Reject ❌", callback_data=f"reject_sub_start_{submission.id}")]]
+    
+    # Store the original message object to edit it later
+    if update.callback_query:
+        context.user_data['admin_submission_message'] = message_to_edit
     
     try:
         photo_data = base64.b64decode(submission.photo_proof_base64.split(',')[1])
-        # Edit the original message to show the current submission, or send a new one if it's the first.
-        # This handles cases where the original message might have been deleted.
-        if query.message.photo: # If the current message already has a photo, edit it
-            await query.message.edit_media(
-                media=InputFile(BytesIO(photo_data)),
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                caption=caption,
-                parse_mode='Markdown'
-            )
-        else: # If no photo, send a new photo message and delete the previous text message
-            await query.message.delete()
-            await context.bot.send_photo(chat_id=query.message.chat_id, photo=BytesIO(photo_data), caption=caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        # To avoid "Message is not modified" errors, check if content is truly different.
+        # This is complex for photos as caption could change. Simplest is to just edit.
+        await message_to_edit.edit_media(
+            media=InputFile(BytesIO(photo_data), filename=f"submission_{submission.id}.png"), # Added filename
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            caption=caption,
+            parse_mode='Markdown'
+        )
     except Exception as e:
         logger.error(f"Failed to display photo for submission {submission.id}: {e}. Sending as text instead.")
         # If photo fails, send as text and log error
-        await query.message.edit_text(caption + "\n\n*(Failed to display image proof)*", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        new_text_content = caption + "\n\n*(Failed to display image proof)*"
+        if message_to_edit.text == new_text_content and message_to_edit.reply_markup == InlineKeyboardMarkup(keyboard):
+            logger.info("Message content not modified, skipping edit.")
+        else:
+            await message_to_edit.edit_text(new_text_content, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 
 async def approve_submission(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -969,24 +1240,29 @@ async def approve_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     sub_id = int(query.data.split("_")[2]); 
     submission = db_session.query(TaskSubmission).filter(TaskSubmission.id == sub_id).first()
+    
+    # Check if submission is still pending
     if not submission or submission.status != 'pending': 
-        await query.edit_message_caption(caption=f"{query.message.caption.text}\n\n**Status: Already processed.**", parse_mode='Markdown')
+        await query.edit_message_caption(caption=f"{query.message.caption}\n\n**Status: Already processed.**", parse_mode='Markdown')
         return
     
     user_db = db_session.query(User).filter(User.id == submission.user_id).first() 
     task = db_session.query(Task).filter(Task.id == submission.task_id).first()
     
+    # Defensive checks
     if not user_db or user_db.status != 'active':
-        submission.status = 'rejected' # Mark as rejected due to inactive user
+        submission.status = 'rejected' 
+        submission.rejection_reason = "User account not active."
         db_session.commit()
-        await query.edit_message_caption(caption=f"{query.message.caption.text}\n\n**Status: REJECTED (User not active or found)**", parse_mode='Markdown')
+        await query.edit_message_caption(caption=f"{query.message.caption}\n\n**Status: REJECTED (User not active or found)**", parse_mode='Markdown')
         logger.warning(f"Submission {sub_id} rejected: User {submission.user_id} not active or found.")
         await review_submissions(update, context) # Show next pending submission
         return
     if not task:
-        submission.status = 'rejected' # Mark as rejected due to missing task
+        submission.status = 'rejected' 
+        submission.rejection_reason = "Associated task not found."
         db_session.commit()
-        await query.edit_message_caption(caption=f"{query.message.caption.text}\n\n**Status: REJECTED (Task not found)**", parse_mode='Markdown')
+        await query.edit_message_caption(caption=f"{query.message.caption}\n\n**Status: REJECTED (Task not found)**", parse_mode='Markdown')
         logger.warning(f"Submission {sub_id} rejected: Task {submission.task_id} not found.")
         await review_submissions(update, context) # Show next pending submission
         return
@@ -995,7 +1271,6 @@ async def approve_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
     submission.status = 'approved'
     
     try:
-        # Only add reward if task hasn't been completed by this user before
         completed_task_ids_list = json.loads(user_db.completed_task_ids) if user_db.completed_task_ids else []
         if task.id not in completed_task_ids_list:
             user_db.balance += task.reward
@@ -1004,13 +1279,12 @@ async def approve_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
             user_db.completed_task_ids = json.dumps(completed_task_ids_list)
 
             # --- REFERRAL COMMISSION LOGIC ---
-            if user_db.referrer_id: # Check if the user was referred by someone
+            if user_db.referrer_id: 
                 referrer = db_session.query(User).filter(User.id == user_db.referrer_id).first()
-                if referrer and referrer.status == 'active': # Ensure referrer exists and is active
+                if referrer and referrer.status == 'active': 
                     commission_amount = task.reward * REFERRAL_COMMISSION_PERCENT
                     referrer.balance += commission_amount
-                    # Increment successful_referrals only on the first task completion by the referred user
-                    if user_db.tasks_completed == 1: 
+                    if user_db.tasks_completed == 1: # Only on the first task ever completed by the referred user
                         referrer.successful_referrals += 1
                     
                     await ptb_app.bot.send_message(
@@ -1027,12 +1301,11 @@ async def approve_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
             # Check and award Task Milestones
             claimed_milestones = json.loads(user_db.claimed_milestones) if user_db.claimed_milestones else {}
             for milestone_str, reward_amount in TASK_MILESTONES.items():
-                milestone = int(milestone_str.split('_')[0]) # Extract numerical part
-                # Check if milestone is met for the first time
+                milestone = int(milestone_str.split('_')[0]) 
                 if user_db.tasks_completed >= milestone and claimed_milestones.get(milestone_str) is None:
                     user_db.balance += reward_amount
                     claimed_milestones[milestone_str] = True
-                    user_db.claimed_milestones = json.dumps(claimed_milestones) # Update claimed milestones
+                    user_db.claimed_milestones = json.dumps(claimed_milestones) 
                     await ptb_app.bot.send_message(user_db.id, f"🎉 Milestone Reached! You completed {milestone} tasks and earned a bonus of ₱{reward_amount:.2f}!")
                     logger.info(f"User {user_db.id} reached milestone {milestone} tasks and claimed {reward_amount:.2f}.")
             
@@ -1040,12 +1313,17 @@ async def approve_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await ptb_app.bot.send_message(chat_id=user_db.id, text=f"🎉 Your submission for '{task.description}' was approved! You earned ₱{task.reward:.2f}.")
             logger.info(f"Submission {sub_id} approved for user {user_db.id}, task {task.id}. User balance updated.")
         else:
-            # If task was already completed by this user, approve the submission but don't re-award
             db_session.commit()
             await ptb_app.bot.send_message(chat_id=user_db.id, text=f"✅ Your submission for '{task.description}' was approved. (Reward already processed for this task).")
             logger.info(f"Submission {sub_id} approved for user {user_db.id}, task {task.id}. Task already completed, no new reward.")
 
-        await query.edit_message_caption(caption=f"{query.message.caption.text}\n\n**Status: APPROVED**", parse_mode='Markdown')
+        new_caption = f"{query.message.caption}\n\n**Status: APPROVED**"
+        # Check if message is already modified to avoid BadRequest
+        if query.message.caption != new_caption:
+            await query.edit_message_caption(caption=new_caption, parse_mode='Markdown')
+        else:
+            logger.info(f"Admin message for submission {sub_id} already shows APPROVED. Skipping edit.")
+
         await review_submissions(update, context) # Show next pending submission
 
     except Exception as e:
@@ -1059,7 +1337,16 @@ async def reject_submission_start(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query; await query.answer()
     if query.from_user.id not in ADMIN_CHAT_IDS: return
 
-    context.user_data['submission_id_to_reject'] = int(query.data.split("_")[3])
+    sub_id = int(query.data.split("_")[3])
+    submission = db_session.query(TaskSubmission).filter(TaskSubmission.id == sub_id).first()
+    
+    if not submission or submission.status != 'pending': 
+        await query.edit_message_caption(caption=f"{query.message.caption}\n\n**Status: Already processed.**", parse_mode='Markdown')
+        return
+
+    context.user_data['submission_id_to_reject'] = sub_id
+    # Store the original message caption for later editing
+    context.user_data['original_submission_caption'] = query.message.caption
     await query.message.reply_text("Please provide a brief reason for rejecting this submission (or send /skip for no reason).\n\nTo cancel, send /cancel."); 
     return SUBMIT_TASK_REJECT_REASON
 
@@ -1067,7 +1354,9 @@ async def get_submission_rejection_reason(update: Update, context: ContextTypes.
     if update.effective_user.id not in ADMIN_CHAT_IDS: return
 
     sub_id = context.user_data.get('submission_id_to_reject')
+    original_caption = context.user_data.get('original_submission_caption', "Submission Review") # Default if not found
     submission = db_session.query(TaskSubmission).filter(TaskSubmission.id == sub_id).first()
+    
     if not submission or submission.status != 'pending': 
         await update.message.reply_text("Submission already processed or not found."); 
         return ConversationHandler.END
@@ -1076,12 +1365,23 @@ async def get_submission_rejection_reason(update: Update, context: ContextTypes.
     
     try:
         submission.status = 'rejected'; 
+        submission.rejection_reason = reason # Save rejection reason
         db_session.commit()
         await update.message.reply_text(f"❌ Submission #{sub_id} has been rejected.")
         task = db_session.query(Task).filter(Task.id == submission.task_id).first()
         task_description = task.description if task else "Unknown Task"
         await ptb_app.bot.send_message(chat_id=submission.user_id, text=f"⚠️ Your submission for '{task_description}' was rejected.\n\n**Admin's Remark:** {reason}", parse_mode='Markdown')
         logger.info(f"Admin {update.effective_user.id} rejected submission {sub_id} for user {submission.user_id}.")
+
+        # Edit the original admin message to show rejected status
+        admin_message_to_edit = context.user_data.get('admin_submission_message')
+        if admin_message_to_edit:
+            new_caption = f"{original_caption}\n\n**Status: REJECTED**\nReason: {reason}"
+            if admin_message_to_edit.caption != new_caption:
+                await admin_message_to_edit.edit_caption(caption=new_caption, parse_mode='Markdown')
+            else:
+                logger.info(f"Admin message for submission {sub_id} already shows REJECTED. Skipping edit.")
+
     except Exception as e:
         db_session.rollback()
         logger.error(f"Error rejecting submission {sub_id}: {e}", exc_info=True)
@@ -1097,15 +1397,30 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     wd_id = int(query.data.split("_")[2]); 
     withdrawal = db_session.query(Withdrawal).filter(Withdrawal.id == wd_id).first()
+    
     if not withdrawal or withdrawal.status != "pending": 
-        await query.edit_message_text(f"Request #{wd_id} already processed or not found."); 
+        # Safely access message text or caption
+        message_content = query.message.text if query.message.text else query.message.caption
+        new_content = f"{message_content}\n\n**Status: Already processed.**"
+        if message_content != new_content:
+            await query.message.edit_text(new_content, parse_mode='Markdown')
+        else:
+            logger.info(f"Admin message for withdrawal {wd_id} already shows processed. Skipping edit.")
         return
     
     try:
         withdrawal.status = "approved"; 
         db_session.commit(); 
-        await query.edit_message_text(f"✅ Request #{wd_id} approved.")
-        await ptb_app.bot.send_message(chat_id=withdrawal.user_id, text=f"🎉 Good news! Your withdrawal of ₱{withdrawal.amount:.2f} has been approved and sent via {withdrawal.method}.")
+        
+        # Safely access message text or caption
+        message_content = query.message.text if query.message.text else query.message.caption
+        new_content = f"{message_content}\n\n✅ **Request #{wd_id} approved.**"
+        if message_content != new_content:
+            await query.message.edit_text(new_content, parse_mode='Markdown')
+        else:
+            logger.info(f"Admin message for withdrawal {wd_id} already shows approved. Skipping edit.")
+        
+        await ptb_app.bot.send_message(chat_id=withdrawal.user_id, text=f"🎉 Good news! Your withdrawal of ₱{withdrawal.amount:.2f} has been approved and sent.")
         logger.info(f"Admin {query.from_user.id} approved withdrawal {wd_id} for user {withdrawal.user_id}.")
     except Exception as e:
         db_session.rollback()
@@ -1117,7 +1432,22 @@ async def reject_withdrawal_start(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query; await query.answer()
     if query.from_user.id not in ADMIN_CHAT_IDS: return
 
-    context.user_data['withdrawal_id_to_reject'] = int(query.data.split("_")[3])
+    wd_id = int(query.data.split("_")[3])
+    withdrawal = db_session.query(Withdrawal).filter(Withdrawal.id == wd_id).first()
+    
+    if not withdrawal or withdrawal.status != 'pending': 
+        # Safely access message text or caption
+        message_content = query.message.text if query.message.text else query.message.caption
+        new_content = f"{message_content}\n\n**Status: Already processed.**"
+        if message_content != new_content:
+            await query.message.edit_text(new_content, parse_mode='Markdown')
+        else:
+            logger.info(f"Admin message for withdrawal {wd_id} already shows processed. Skipping edit.")
+        return
+
+    context.user_data['withdrawal_id_to_reject'] = wd_id
+    # Store the original message text/caption for later editing
+    context.user_data['original_withdrawal_message_content'] = query.message.text if query.message.text else query.message.caption
     await query.message.reply_text("Please provide a brief reason for rejecting this withdrawal (or send /skip).\n\nTo cancel, send /cancel."); 
     return REJECT_REASON_WD
 
@@ -1125,7 +1455,9 @@ async def get_withdrawal_rejection_reason(update: Update, context: ContextTypes.
     if update.effective_user.id not in ADMIN_CHAT_IDS: return
 
     wd_id = context.user_data.get('withdrawal_id_to_reject')
+    original_content = context.user_data.get('original_withdrawal_message_content', "Withdrawal Request")
     withdrawal = db_session.query(Withdrawal).filter(Withdrawal.id == wd_id).first()
+    
     if not withdrawal or withdrawal.status != 'pending': 
         await update.message.reply_text("Withdrawal already processed or not found."); 
         return ConversationHandler.END
@@ -1134,18 +1466,32 @@ async def get_withdrawal_rejection_reason(update: Update, context: ContextTypes.
     user_db = db_session.query(User).filter(User.id == withdrawal.user_id).first(); 
     
     try:
-        # Only return funds if the withdrawal was actually pending and rejected
-        # The frontend already deducts, so if rejected, we add it back
         if withdrawal.status == 'pending' and user_db:
             user_db.balance += withdrawal.amount + withdrawal.fee # Return full amount deducted
             await ptb_app.bot.send_message(chat_id=user_db.id, text=f"⚠️ Your withdrawal request of ₱{withdrawal.amount:.2f} was rejected and the amount returned to your balance.\n\n**Admin's Remark:** {reason}", parse_mode='Markdown')
         elif not user_db:
             logger.warning(f"User {withdrawal.user_id} not found for withdrawal {wd_id}, cannot return funds.")
-
+        
         withdrawal.status = "rejected"; 
+        withdrawal.rejection_reason = reason # Save rejection reason
         db_session.commit()
         await update.message.reply_text(f"❌ Request #{wd_id} has been rejected.")
         logger.info(f"Admin {update.effective_user.id} rejected withdrawal {wd_id} for user {withdrawal.user_id}.")
+
+        # Edit the original admin message to show rejected status
+        admin_message_to_edit_id = context.user_data.get('admin_withdrawal_message_id') # If we stored the message ID
+        # For simplicity, since the rejection reason is passed directly in the conversation,
+        # we'll just send a new message to the admin, or rely on them seeing their own chat.
+        # Editing the original message is harder outside a callback_query context.
+        # Alternatively, we could've stored query.message in user_data.
+        # Let's directly edit the message that initiated the rejection
+        if context.user_data.get('admin_withdrawal_message_object'):
+            message_obj = context.user_data['admin_withdrawal_message_object']
+            new_content = f"{original_content}\n\n❌ **Request #{wd_id} rejected.**\nReason: {reason}"
+            if message_obj.text != new_content:
+                await message_obj.edit_text(new_content, parse_mode='Markdown')
+            else:
+                logger.info(f"Admin message for withdrawal {wd_id} already shows rejected. Skipping edit.")
     except Exception as e:
         db_session.rollback()
         logger.error(f"Error rejecting withdrawal {wd_id}: {e}", exc_info=True)
@@ -1164,8 +1510,15 @@ async def maintenance_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     keyboard = [[InlineKeyboardButton(toggle_button_text, callback_data="toggle_maintenance")],
                 [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]
-    await query.message.edit_text(f"Withdrawal Maintenance is currently {current_status_text}", reply_markup=InlineKeyboardMarkup(keyboard))
     
+    new_message_text = f"Withdrawal Maintenance is currently {current_status_text}"
+    # Check if message is already modified to avoid BadRequest
+    if query.message.text != new_message_text or query.message.reply_markup != InlineKeyboardMarkup(keyboard):
+        await query.message.edit_text(new_message_text, reply_markup=InlineKeyboardMarkup(keyboard))
+    else:
+        logger.info("Maintenance status message not modified, skipping edit.")
+
+
 async def toggle_maintenance_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer()
     if query.from_user.id not in ADMIN_CHAT_IDS: return
@@ -1174,17 +1527,24 @@ async def toggle_maintenance_mode(update: Update, context: ContextTypes.DEFAULT_
     if not maintenance_info: 
         maintenance_info = SystemInfo(key='withdrawal_maintenance', value='false')
 
-    new_status = "true" if maintenance_info.value == "false" else "false"
-    maintenance_info.value = new_status
+    new_status_value = "true" if maintenance_info.value == "false" else "false"
+    maintenance_info.value = new_status_value
     
     try:
         db_session.add(maintenance_info); db_session.commit()
-        status_text = "ENABLED ✅" if new_status == "true" else "DISABLED ❌"
-        toggle_button_text = f"Turn {'OFF' if new_status=='true' else 'ON'}"
+        status_text = "ENABLED ✅" if new_status_value == "true" else "DISABLED ❌"
+        toggle_button_text = f"Turn {'OFF' if new_status_value=='true' else 'ON'}"
         keyboard = [[InlineKeyboardButton(toggle_button_text, callback_data="toggle_maintenance")],
                     [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]
-        await query.message.edit_text(f"Withdrawal Maintenance is now {status_text}", reply_markup=InlineKeyboardMarkup(keyboard))
-        logger.info(f"Admin {query.from_user.id} toggled withdrawal maintenance to {new_status}.")
+        
+        new_message_text = f"Withdrawal Maintenance is now {status_text}"
+        # Check if message is already modified to avoid BadRequest
+        if query.message.text != new_message_text or query.message.reply_markup != InlineKeyboardMarkup(keyboard):
+            await query.message.edit_text(new_message_text, reply_markup=InlineKeyboardMarkup(keyboard))
+        else:
+            logger.info("Maintenance status message not modified by toggle, skipping edit.")
+
+        logger.info(f"Admin {query.from_user.id} toggled withdrawal maintenance to {new_status_value}.")
     except Exception as e:
         db_session.rollback()
         logger.error(f"Error toggling maintenance mode: {e}")
@@ -1234,6 +1594,8 @@ async def send_warn_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_CHAT_IDS: return
     await update.message.reply_text("Operation cancelled.")
+    # Clear user_data for this conversation
+    context.user_data.clear()
     return ConversationHandler.END
 
 # --- Add Handlers to the PTB Application ---
@@ -1248,15 +1610,13 @@ ptb_app.add_handler(ConversationHandler(
     entry_points=[CallbackQueryHandler(broadcast_start, pattern="^admin_broadcast$")], 
     states={BROADCAST_MESSAGE: [MessageHandler(filters.ALL & ~filters.COMMAND, broadcast_message)]}, 
     fallbacks=[cancel_handler], 
-    per_user=True,
-    per_chat=False # Should be per_user for admin conversations
+    per_user=True, per_chat=False
 ))
 ptb_app.add_handler(ConversationHandler(
     entry_points=[CallbackQueryHandler(announcement_start, pattern="^admin_set_announcement$")], 
     states={ANNOUNCEMENT_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_announcement_text)]}, 
     fallbacks=[cancel_handler], 
-    per_user=True,
-    per_chat=False
+    per_user=True, per_chat=False
 ))
 ptb_app.add_handler(ConversationHandler(
     entry_points=[CallbackQueryHandler(add_task_start, pattern="^add_task_start$")], 
@@ -1266,8 +1626,7 @@ ptb_app.add_handler(ConversationHandler(
         TASK_REWARD: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_task_reward)]
     }, 
     fallbacks=[cancel_handler], 
-    per_user=True,
-    per_chat=False
+    per_user=True, per_chat=False
 ))
 ptb_app.add_handler(ConversationHandler(
     entry_points=[CallbackQueryHandler(add_code_start, pattern="^add_code_start$")], 
@@ -1277,8 +1636,7 @@ ptb_app.add_handler(ConversationHandler(
         NEW_CODE_USES: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_new_code_uses)]
     }, 
     fallbacks=[cancel_handler], 
-    per_user=True,
-    per_chat=False
+    per_user=True, per_chat=False
 ))
 ptb_app.add_handler(ConversationHandler(
     entry_points=[CallbackQueryHandler(user_mgt_action_callback, pattern=r"^user_mgt_(ban|unban|restrict)$")], 
@@ -1287,8 +1645,7 @@ ptb_app.add_handler(ConversationHandler(
         USER_MGT_DURATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, user_mgt_duration_input)]
     }, 
     fallbacks=[cancel_handler], 
-    per_user=True,
-    per_chat=False
+    per_user=True, per_chat=False
 ))
 ptb_app.add_handler(ConversationHandler(
     entry_points=[CallbackQueryHandler(rain_start, pattern="^admin_rain$")], 
@@ -1297,22 +1654,19 @@ ptb_app.add_handler(ConversationHandler(
         RAIN_USERS: [MessageHandler(filters.TEXT & ~filters.COMMAND, rain_users_input)]
     }, 
     fallbacks=[cancel_handler], 
-    per_user=True,
-    per_chat=False
+    per_user=True, per_chat=False
 ))
 ptb_app.add_handler(ConversationHandler(
     entry_points=[CallbackQueryHandler(reject_withdrawal_start, pattern=r"^reject_wd_start_\d+$")], 
     states={REJECT_REASON_WD: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_withdrawal_rejection_reason)]}, 
     fallbacks=[cancel_handler], 
-    per_user=True,
-    per_chat=False
+    per_user=True, per_chat=False
 ))
 ptb_app.add_handler(ConversationHandler(
     entry_points=[CallbackQueryHandler(reject_submission_start, pattern=r"^reject_sub_start_\d+$")], 
     states={SUBMIT_TASK_REJECT_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_submission_rejection_reason)]}, 
     fallbacks=[cancel_handler], 
-    per_user=True,
-    per_chat=False
+    per_user=True, per_chat=False
 ))
 ptb_app.add_handler(ConversationHandler(
     entry_points=[CallbackQueryHandler(warn_user_start, pattern="^admin_warn_user$")], 
@@ -1321,8 +1675,24 @@ ptb_app.add_handler(ConversationHandler(
         WARN_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, send_warn_message)]
     }, 
     fallbacks=[cancel_handler], 
-    per_user=True,
-    per_chat=False
+    per_user=True, per_chat=False
+))
+# New Admin Conversations
+ptb_app.add_handler(ConversationHandler(
+    entry_points=[CallbackQueryHandler(user_search_start, pattern="^admin_user_search$")],
+    states={USER_SEARCH_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, user_search_input)]},
+    fallbacks=[cancel_handler],
+    per_user=True, per_chat=False
+))
+ptb_app.add_handler(ConversationHandler(
+    entry_points=[CallbackQueryHandler(adjust_balance_start, pattern="^admin_adjust_balance$")],
+    states={
+        ADJUST_BALANCE_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_adjust_balance_id)],
+        ADJUST_BALANCE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_adjust_balance_amount)],
+        ADJUST_BALANCE_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_adjust_balance)]
+    },
+    fallbacks=[cancel_handler],
+    per_user=True, per_chat=False
 ))
 
 
@@ -1335,7 +1705,7 @@ ptb_app.add_handler(CallbackQueryHandler(delete_task_callback, pattern=r"^delete
 ptb_app.add_handler(CallbackQueryHandler(manage_codes, pattern="^admin_manage_codes$"))
 ptb_app.add_handler(CallbackQueryHandler(remove_code_list, pattern="^remove_code_list$"))
 ptb_app.add_handler(CallbackQueryHandler(delete_code_callback, pattern=r"^delete_code_\d+$"))
-ptb_app.add_handler(CallbackQueryHandler(user_mgt_start, pattern="^admin_user_mgt$")) # Entry point for user management menu
+ptb_app.add_handler(CallbackQueryHandler(user_mgt_start, pattern="^admin_user_mgt$")) 
 ptb_app.add_handler(CallbackQueryHandler(review_submissions, pattern="^admin_pending_submissions$"))
 ptb_app.add_handler(CallbackQueryHandler(approve_submission, pattern=r"^approve_sub_\d+$"))
 ptb_app.add_handler(CallbackQueryHandler(approve_withdrawal, pattern=r"^approve_wd_\d+$"))
@@ -1346,5 +1716,4 @@ ptb_app.add_handler(CallbackQueryHandler(toggle_maintenance_mode, pattern="^togg
 # --- Main Entry ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
-    # Using `reload=False` for production as `reload=True` consumes more resources and is for development.
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
