@@ -18,7 +18,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 BOT_TOKEN = "8085121840:AAHGpim6s0j8FU8yZ5jSiyu6Ol51Rdgod8E"  # Get this from @BotFather
 BOT_USERNAME = "XeweeBot"             # Your bot's @username (without the @)
 ADMIN_CHAT_IDS: Tuple[int, ...] = (7588209802, 6780778947) # Your Super Admin Telegram User IDs (can be multiple)
-MINI_APP_URL = "https://82628273728-app-frontend-seven.vercel.app" # Your Vercel frontend URL - *** REMEMBER TO UPDATE THIS! ***
+MINI_APP_URL = "https://82628273728-app-frontend-seven.vercel.app" # Your Vercel frontend URL - *** UPDATED ***
 XEWEE_NEWS_CHANNEL_URL = "https://t.me/XeweeNews" # Your news channel URL
 # ------------------------------------
 
@@ -620,17 +620,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         caption = f"⚠️ Your account is restricted until {user_db.status_until.strftime('%b %d')}."; keyboard = []
     else:
         caption = (
-            f"**Xewee: Your Gateway to Free Tasks and Rewards!**\n\n"
-            f"Play the #1 Social Parody Game on Telegram 💎 Backed by a16z\n\n"
-            f"Co-op with friends, Farm coins and Spin for massive wins!\n\n"
-            f"**How to Play?**\n"
-            f"🎰 Spin to win coins every day\n"
-            f"🤝 Team up with friends to farm faster\n"
-            f"💰 Farm together in epic co-op adventures\n"
-            f"🏆 Rise to the TOP\n\n"
-            f"Millions already joined. Your mom too probably 🤭\n\n"
+            f"**Xewee: Your Gateway to Free Tasks and Real Rewards!**\n\n"
+            f"Dive into the #1 Social Task Game on Telegram 🚀 Earn big by completing fun challenges!\n\n"
+            f"🎯 **Complete Tasks:** Discover daily quests and earn rewards.\n"
+            f"🤝 **Refer & Earn:** Grow your network and get commissions from friends' activities.\n"
+            f"🏆 **Rise to the Top:** Compete, achieve milestones, and claim your treasure!\n\n"
+            f"Millions are already earning. Why not you? 🤑\n\n"
             f"Xewee is free-to-play. No purchase is necessary. Buying stuff is totally optional and doesn’t guarantee rewards.\n\n"
-            f"Xewee is an extreme parody game made for responsible adults 18+. The game does not offer any real form of real money gambling. By playing, you agree to our Terms of Service and Privacy Policy 🔞"
+            f"Xewee is a rewarding game made for responsible adults 18+. The game does not offer any real money gambling. By playing, you agree to our Terms of Service and Privacy Policy 🔞"
         )
         keyboard = [
             [InlineKeyboardButton("✏️ Start Xewee", web_app=WebAppInfo(url=MINI_APP_URL))],
