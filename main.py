@@ -61,7 +61,6 @@ class User(Base):
     last_login_date = Column(Date, nullable=True) # For daily bonus claim
     daily_claim_invites = Column(Integer, default=0) # Invites since last daily claim
     claimed_milestones = Column(Text, default="{}") # JSON string for task milestones claimed
-    # Add username column for search functionality (optional, but good for admin)
     username = Column(String, nullable=True) 
 
 class Task(Base):
@@ -120,7 +119,7 @@ engine = create_engine(DATABASE_URL); Base.metadata.create_all(engine); Session 
 TASK_DESC, TASK_LINK, TASK_REWARD, REJECT_REASON_WD, BROADCAST_MESSAGE, ANNOUNCEMENT_TEXT, \
 NEW_CODE_CODE, NEW_CODE_REWARD, NEW_CODE_USES, USER_MGT_ID, USER_MGT_ACTION, USER_MGT_DURATION, \
 RAIN_AMOUNT, RAIN_USERS, SUBMIT_TASK_REJECT_REASON, DELETE_TASK, DELETE_CODE, WARN_USER_ID, \
-WARN_REASON, USER_SEARCH_INPUT, ADJUST_BALANCE_ID, ADJUST_BALANCE_AMOUNT, ADJUST_BALANCE_CONFIRM = range(23) # CORRECTED: range to 23
+WARN_REASON, USER_SEARCH_INPUT, ADJUST_BALANCE_ID, ADJUST_BALANCE_AMOUNT, ADJUST_BALANCE_CONFIRM = range(23)
 
 # --- Bot & API Lifespan ---
 ptb_app = Application.builder().token(BOT_TOKEN).build()
@@ -588,6 +587,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif user_db.first_name != user.first_name or user_db.username != user.username: # Update if name or username changed
         user_db.first_name = user.first_name
         user_db.username = user.username
+        db_session.commit() # Commit update
         logger.info(f"User {user.id} info updated to {user.first_name} (@{user.username}).")
 
     if context.args:
@@ -624,6 +624,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Dive into the #1 Social Task Game on Telegram 🚀 Earn big by completing fun challenges!\n\n"
             f"🎯 **Complete Tasks:** Discover daily quests and earn rewards.\n"
             f"🤝 **Refer & Earn:** Grow your network and get commissions from friends' activities.\n"
+            f"💰 **Farm for Wins:** Engage in epic co-op adventures to boost your earnings.\n"
             f"🏆 **Rise to the Top:** Compete, achieve milestones, and claim your treasure!\n\n"
             f"Millions are already earning. Why not you? 🤑\n\n"
             f"Xewee is free-to-play. No purchase is necessary. Buying stuff is totally optional and doesn’t guarantee rewards.\n\n"
@@ -1697,7 +1698,7 @@ async def toggle_maintenance_mode(update: Update, context: ContextTypes.DEFAULT_
         if query.message.text != new_message_text or query.message.reply_markup != InlineKeyboardMarkup(keyboard):
             await query.message.edit_text(new_message_text, reply_markup=InlineKeyboardMarkup(keyboard))
         else:
-            logger.info("Maintenance status message not modified by toggle, skipping edit.")
+            logger.info(f"Admin message for maintenance already shows {status_text}. Skipping edit.")
 
         logger.info(f"Admin {query.from_user.id} toggled withdrawal maintenance to {new_status_value}.")
     except Exception as e:
