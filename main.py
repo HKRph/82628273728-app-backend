@@ -14,29 +14,26 @@ from sqlalchemy import create_engine, Column, Integer, BigInteger, String, Float
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
 # --- Configuration ---
-# *** IMPORTANT: REPLACE THESE WITH YOUR ACTUAL VALUES ***
-BOT_TOKEN = "8085121840:AAHGpim6s0j8FU8yZ5jSiyu6Ol51Rdgod8E"  # Get this from @BotFather
-BOT_USERNAME = "XeweeBot"             # Your bot's @username (without the @)
-ADMIN_CHAT_IDS: Tuple[int, ...] = (7588209802, 6780778947) # Your Super Admin Telegram User IDs (can be multiple)
-MINI_APP_URL = "https://82628273728-app-frontend-seven.vercel.app" # Your Vercel frontend URL - *** REMEMBER TO UPDATE THIS! ***
-# ------------------------------------
+BOT_TOKEN = "8085121840:AAHGpim6s0j8FU8yZ5jSiyu6Ol51Rdgod8E"
+BOT_USERNAME = "XeweeBot"
+ADMIN_CHAT_IDS: Tuple[int, ...] = (7588209802, 6780778947)
+MINI_APP_URL = "https://82628273728-app-frontend-seven.vercel.app" # IMPORTANT: REPLACE WITH YOUR VERCEL FRONTEND URL!
 
 # --- Xewee Feature Constants ---
-REFERRAL_COMMISSION_PERCENT = 0.10  # 10% commission on referred user's task reward
+REFERRAL_COMMISSION_PERCENT = 0.10
+MIN_WITHDRAWAL = 300.0
+MAX_WITHDRAWAL = 30000.0
+WITHDRAWAL_FEE_PERCENT = 0.03
 
-MIN_WITHDRAWAL = 300.0              # Minimum amount a user can withdraw
-MAX_WITHDRAWAL = 30000.0            # Maximum amount a user can withdraw
-WITHDRAWAL_FEE_PERCENT = 0.03       # 3% fee on withdrawals
+DAILY_BONUS = 10.0
+DAILY_BONUS_INVITE_REQ = 2
 
-DAILY_BONUS = 10.0                  # Amount for daily login bonus
-DAILY_BONUS_INVITE_REQ = 2          # Number of new invites required since last claim for daily bonus
+TASK_MILESTONES = {"10_tasks": 50.0, "20_tasks": 150.0, "30_tasks": 400.0}
 
-TASK_MILESTONES = {"10_tasks": 50.0, "20_tasks": 150.0, "30_tasks": 400.0} # Bonus rewards for completing tasks
-
-GIFT_TICKET_PRICE = 10.0            # Price per Gift Ticket
-GIFT_MIN_AMOUNT = 30.0              # Minimum amount a user can gift
+GIFT_TICKET_PRICE = 10.0
+GIFT_MIN_AMOUNT = 30.0
 GIFT_MAX_AMOUNT = 80000.0
-GIFT_FEE_PERCENT = 0.05             # 5% fee on gifted amount
+GIFT_FEE_PERCENT = 0.05
 
 GAME_ROOM_INACTIVITY_TIMEOUT_MIN = 60 # Minutes before an unjoined or stagnant game room is cancelled
 GAME_TARGET_SCORE = 3 # First player to reach this score wins
@@ -50,22 +47,25 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = "users"
     id = Column(BigInteger, primary_key=True, autoincrement=False)
-    first_name = Column(String, nullable=True) # Storing first name for better messages
+    first_name = Column(String, nullable=True)
+    last_name = Column(String, nullable=True) # Added for more complete user info
+    username = Column(String, nullable=True) # Added to easily retrieve for games/notifications
     balance = Column(Float, default=0.0)
     gift_tickets = Column(Integer, default=0)
-    referral_count = Column(Integer, default=0) # Total referred users
-    successful_referrals = Column(Integer, default=0) # Referred users who completed at least one task
-    tasks_completed = Column(Integer, default=0) # Total tasks completed by user
-    completed_task_ids = Column(Text, default="[]") # JSON list of task IDs completed by this user
+    referral_count = Column(Integer, default=0)
+    successful_referrals = Column(Integer, default=0)
+    tasks_completed = Column(Integer, default=0)
+    completed_task_ids = Column(Text, default="[]")
     referrer_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)
-    status = Column(String, default="active") # active, banned, restricted
-    status_until = Column(Date, nullable=True) # For temporary restrictions
-    last_login_date = Column(Date, nullable=True) # For daily bonus claim
-    daily_claim_invites = Column(Integer, default=0) # Invites since last daily claim
-    claimed_milestones = Column(Text, default="{}") # JSON string for task milestones claimed
-    # Relationships for convenience
+    status = Column(String, default="active")
+    status_until = Column(Date, nullable=True)
+    last_login_date = Column(Date, nullable=True)
+    daily_claim_invites = Column(Integer, default=0)
+    claimed_milestones = Column(Text, default="{}")
+    
     created_game_rooms = relationship("GameRoom", foreign_keys="[GameRoom.creator_id]", back_populates="creator")
     joined_game_rooms = relationship("GameRoom", foreign_keys="[GameRoom.opponent_id]", back_populates="opponent")
+    # No back_populates for winner to avoid circular references if not strictly needed in User model
 
 
 class Task(Base):
@@ -82,10 +82,10 @@ class TaskSubmission(Base):
     task_id = Column(Integer)
     text_proof = Column(Text)
     photo_proof_base64 = Column(Text)
-    status = Column(String, default="pending") # pending, approved, rejected
-    rejection_reason = Column(Text, nullable=True) # Added for more detail
+    status = Column(String, default="pending")
+    rejection_reason = Column(Text, nullable=True)
     created_at = Column(Date, default=date.today())
-    is_read = Column(Boolean, default=False) # For new notification system
+    is_read = Column(Boolean, default=False)
 
 class Withdrawal(Base):
     __tablename__ = "withdrawals"
@@ -95,30 +95,30 @@ class Withdrawal(Base):
     fee = Column(Float, default=0.0)
     method = Column(String)
     details = Column(String)
-    status = Column(String, default="pending") # pending, approved, rejected
-    rejection_reason = Column(Text, nullable=True) # Added for more detail
+    status = Column(String, default="pending")
+    rejection_reason = Column(Text, nullable=True)
     created_at = Column(Date, default=date.today())
-    is_read = Column(Boolean, default=False) # For new notification system
+    is_read = Column(Boolean, default=False)
 
 class RedeemCode(Base):
     __tablename__ = "redeem_codes"
     id = Column(Integer, primary_key=True)
     code = Column(String, unique=True)
     reward = Column(Float)
-    uses_left = Column(Integer, default=1) # -1 for unlimited
+    uses_left = Column(Integer, default=1)
 
 class SystemInfo(Base):
     __tablename__ = "system_info"
     key = Column(String, primary_key=True)
     value = Column(String)
 
-class UserEvent(Base): # For generic notifications like referrals, gifts
+class UserEvent(Base):
     __tablename__ = "user_events"
     id = Column(Integer, primary_key=True)
     user_id = Column(BigInteger, ForeignKey("users.id"))
-    event_type = Column(String) # e.g., 'referral_join', 'gift_received'
+    event_type = Column(String) # e.g., 'referral_join', 'gift_received', 'game_won', 'game_lost'
     message = Column(Text)
-    related_id = Column(BigInteger, nullable=True) # e.g., referrer_id, sender_id
+    related_id = Column(BigInteger, nullable=True) # e.g., referrer_id, sender_id, game_id
     amount = Column(Float, nullable=True) # e.g., gift amount, commission amount
     created_at = Column(Date, default=date.today())
     is_read = Column(Boolean, default=False)
@@ -135,7 +135,7 @@ class GameRoom(Base):
     opponent_move = Column(String, nullable=True)
     creator_score = Column(Integer, default=0)
     opponent_score = Column(Integer, default=0)
-    winner_id = Column(BigInteger, ForeignKey("users.id"), nullable=True) # Final winner of the game
+    winner_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -145,18 +145,18 @@ class GameRoom(Base):
 
 
 # Database connection for Railway (PostgreSQL) or local (SQLite)
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///xewee_data.db") # Default to SQLite for local
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///xewee_data.db")
 if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1) # SQLAlchemy expects postgresql://
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 engine = create_engine(DATABASE_URL); Base.metadata.create_all(engine); Session = sessionmaker(bind=engine); db_session = Session()
 
 # --- Conversation States (Explicitly Defined) ---
-# THESE MUST BE EXACTLY 23 ITEMS TO MATCH range(23)
+# THERE ARE EXACTLY 23 STATES (0-22)
 TASK_DESC, TASK_LINK, TASK_REWARD, REJECT_REASON_WD, BROADCAST_MESSAGE, ANNOUNCEMENT_TEXT, \
 NEW_CODE_CODE, NEW_CODE_REWARD, NEW_CODE_USES, USER_MGT_ID, USER_MGT_ACTION, USER_MGT_DURATION, \
 RAIN_AMOUNT, RAIN_USERS, SUBMIT_TASK_REJECT_REASON, DELETE_TASK, DELETE_CODE, WARN_USER_ID, \
-WARN_REASON, USER_SEARCH_INPUT, ADJUST_BALANCE_ID, ADJUST_BALANCE_AMOUNT, ADJUST_BALANCE_CONFIRM = range(23) # CORRECTED: range(23) because there are 23 states (0-22)
+WARN_REASON, USER_SEARCH_INPUT, ADJUST_BALANCE_ID, ADJUST_BALANCE_AMOUNT, ADJUST_BALANCE_CONFIRM = range(23)
 
 # --- Bot & API Lifespan ---
 ptb_app = Application.builder().token(BOT_TOKEN).build()
@@ -165,9 +165,7 @@ ptb_app = Application.builder().token(BOT_TOKEN).build()
 async def lifespan(app: FastAPI):
     logger.info("Lifespan startup...")
     await ptb_app.initialize()
-    # For production, set a webhook URL for your FastAPI application.
-    # For Railway, polling is often simpler for this type of bot.
-    await ptb_app.updater.start_polling(drop_pending_updates=True) # Drop old updates on startup
+    await ptb_app.updater.start_polling(drop_pending_updates=True)
     await ptb_app.start()
     logger.info("Telegram bot has started successfully.")
     yield
@@ -176,7 +174,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Allow all origins for simplicity (adjust for production)
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -187,9 +185,6 @@ app.add_middleware(
 async def health_check():
     return {"status": "ok", "message": f"{BOT_USERNAME} API is running!"}
 
-# Note: For production, you should implement proper initData validation on the backend
-# to ensure requests are truly coming from Telegram Web Apps and are not tampered with.
-# For simplicity in this example, we trust the user_id and _auth (initData string) passed from the frontend.
 @app.post("/get_initial_data")
 async def get_initial_data(request: Request):
     try:
@@ -199,8 +194,21 @@ async def get_initial_data(request: Request):
             raise HTTPException(status_code=400, detail="user_id not provided")
         
         user_db = db_session.query(User).filter(User.id == user_id).first()
-        if not user_db: 
-            user_db = User(id=user_id, first_name='Unknown') # Default first_name, will be updated on /start
+        if not user_db:
+            # Attempt to get full user details from Telegram API if available
+            tg_user_info = None
+            try:
+                tg_chat = await ptb_app.bot.get_chat(user_id)
+                tg_user_info = tg_chat
+            except Exception as e:
+                logger.warning(f"Could not fetch Telegram user info for {user_id} during initial data: {e}")
+
+            user_db = User(
+                id=user_id, 
+                first_name=tg_user_info.first_name if tg_user_info else 'Unknown',
+                last_name=tg_user_info.last_name if tg_user_info else None,
+                username=tg_user_info.username if tg_user_info else None
+            )
             db_session.add(user_db); db_session.commit()
             logger.info(f"New user {user_id} created via get_initial_data.")
         
@@ -212,14 +220,12 @@ async def get_initial_data(request: Request):
             logger.info(f"User {user_id} attempted to access Mini App but is restricted until {user_db.status_until}.")
             raise HTTPException(status_code=403, detail=f"You are restricted until {user_db.status_until.strftime('%b %d')}.")
         elif user_db.status == 'restricted' and user_db.status_until and user_db.status_until <= date.today():
-             # Lift restriction if date has passed
              user_db.status = 'active'; user_db.status_until = None; db_session.commit()
              logger.info(f"Restriction lifted for user {user_id}.")
 
         can_claim_daily = (user_db.last_login_date is None or user_db.last_login_date < date.today()) and user_db.daily_claim_invites >= DAILY_BONUS_INVITE_REQ
         
         tasks = db_session.query(Task).all()
-        # Filter tasks already completed by the user
         completed_task_ids_list = json.loads(user_db.completed_task_ids) if user_db.completed_task_ids else []
         available_tasks = [t for t in tasks if t.id not in completed_task_ids_list]
 
@@ -227,7 +233,6 @@ async def get_initial_data(request: Request):
         announcement = db_session.query(SystemInfo).filter(SystemInfo.key == 'announcement').first()
         withdrawal_maintenance = db_session.query(SystemInfo).filter(SystemInfo.key == 'withdrawal_maintenance').first()
 
-        # Check for active game room
         active_game_room = db_session.query(GameRoom).filter(
             or_(GameRoom.creator_id == user_id, GameRoom.opponent_id == user_id),
             GameRoom.status.in_(['waiting_for_opponent', 'in_progress'])
@@ -258,10 +263,10 @@ async def get_initial_data(request: Request):
             "active_game_room_id": active_game_room.id if active_game_room else None
         }
     except HTTPException as he: 
-        db_session.rollback() # Rollback any potential changes
+        db_session.rollback()
         raise he
     except Exception as e:
-        db_session.rollback() # Rollback any potential changes
+        db_session.rollback()
         logger.error(f"API Error in get_initial_data for user {user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -278,10 +283,9 @@ async def get_notifications(request: Request):
 
         notifications = []
 
-        # Fetch Task Submissions
         task_submissions = db_session.query(TaskSubmission).filter(
             TaskSubmission.user_id == user_id,
-            TaskSubmission.status != 'pending' # Only show approved/rejected
+            TaskSubmission.status != 'pending'
         ).order_by(TaskSubmission.created_at.desc()).all()
 
         for sub in task_submissions:
@@ -298,10 +302,9 @@ async def get_notifications(request: Request):
                     "is_read": sub.is_read
                 })
 
-        # Fetch Withdrawals
         withdrawals = db_session.query(Withdrawal).filter(
             Withdrawal.user_id == user_id,
-            Withdrawal.status != 'pending' # Only show approved/rejected
+            Withdrawal.status != 'pending'
         ).order_by(Withdrawal.created_at.desc()).all()
 
         for wd in withdrawals:
@@ -316,7 +319,6 @@ async def get_notifications(request: Request):
                 "is_read": wd.is_read
             })
         
-        # Fetch User Events (e.g., referral joins, gifts received)
         user_events = db_session.query(UserEvent).filter(UserEvent.user_id == user_id).order_by(UserEvent.created_at.desc()).all()
         for event in user_events:
             notifications.append({
@@ -325,12 +327,11 @@ async def get_notifications(request: Request):
                 "message": event.message,
                 "related_id": event.related_id,
                 "amount": event.amount,
-                "status": "info", # Generic status for events
+                "status": "info", # Generic status for events, frontend maps this to info-bg
                 "date": event.created_at.strftime('%Y-%m-%d'),
                 "is_read": event.is_read
             })
 
-        # Sort all notifications by date (most recent first)
         notifications.sort(key=lambda x: x['date'], reverse=True)
 
         return notifications
@@ -354,11 +355,8 @@ async def mark_notifications_as_read(request: Request):
         if not user_db:
             raise HTTPException(status_code=404, detail="User not found.")
 
-        # Mark Task Submissions as read
         db_session.query(TaskSubmission).filter(TaskSubmission.user_id == user_id).update({"is_read": True})
-        # Mark Withdrawals as read
         db_session.query(Withdrawal).filter(Withdrawal.user_id == user_id).update({"is_read": True})
-        # Mark User Events as read
         db_session.query(UserEvent).filter(UserEvent.user_id == user_id).update({"is_read": True})
         
         db_session.commit()
@@ -382,12 +380,10 @@ async def submit_task_proof(request: Request):
         if not user_db or user_db.status != 'active': 
             raise HTTPException(status_code=403, detail="Account not active or found.")
         
-        # Prevent submitting for an already completed task
         completed_task_ids_list = json.loads(user_db.completed_task_ids) if user_db.completed_task_ids else []
         if task_id in completed_task_ids_list:
             raise HTTPException(status_code=400, detail="You have already completed this task.")
 
-        # Prevent multiple pending submissions for the same task
         existing_pending_submission = db_session.query(TaskSubmission).filter(
             TaskSubmission.user_id == user_id, 
             TaskSubmission.task_id == task_id, 
@@ -401,7 +397,7 @@ async def submit_task_proof(request: Request):
         await ptb_app.bot.send_message(user_id, "✅ Your proof has been submitted for admin review!")
         
         task = db_session.query(Task).filter(Task.id == task_id).first()
-        if not task: # Should ideally not happen if task existed in frontend
+        if not task:
             logger.error(f"Task {task_id} not found for submission {submission.id}")
             task_description = "Unknown Task"
             task_reward = 0.0
@@ -409,10 +405,9 @@ async def submit_task_proof(request: Request):
             task_description = task.description
             task_reward = task.reward
         
-        # Get user's first name and username for admin notification
         user_tg_obj = None
         try:
-            user_tg_obj = await ptb_app.bot.get_chat(user_id) # Fetch actual Telegram user object
+            user_tg_obj = await ptb_app.bot.get_chat(user_id)
         except Exception as e:
             logger.warning(f"Could not fetch live Telegram user object for {user_id}: {e}")
 
@@ -422,7 +417,6 @@ async def submit_task_proof(request: Request):
         caption = f"**New Task Submission for Review**\n\n- User: {user_info_for_admin}\n- Task: {task_description}\n- Reward: ₱{task_reward:.2f}\n- Note: {text}"
         keyboard = [[InlineKeyboardButton("Approve ✅", callback_data=f"approve_sub_{submission.id}"), InlineKeyboardButton("Reject ❌", callback_data=f"reject_sub_start_{submission.id}")]]
         
-        # Decode photo and send to admin
         photo_data = base64.b64decode(photo_base64.split(',')[1])
         for admin_id in ADMIN_CHAT_IDS:
             try:
@@ -454,14 +448,9 @@ async def redeem_code(request: Request):
         if not code or (code.uses_left != -1 and code.uses_left <= 0):
             raise HTTPException(status_code=400, detail="Invalid or expired code.")
 
-        # Basic check: if code is single-use and uses_left is 1, then prevent multiple uses by same user.
-        # For more robust unique user usage, a separate table to track user-code redemptions is needed.
-        # For simplicity, we'll assume a single-use code is for ANY single use, not per user.
-        if code.uses_left == 1:
-            # Check if this user has already redeemed this specific single-use code
-            # This requires a more complex check; for now, we rely on uses_left.
-            # If you want per-user single-use codes, you'd need a UserRedemptionCodes table.
-            pass
+        # For single-use codes (uses_left = 1), you might want to track who used it.
+        # For simplicity here, we just decrement uses_left. If a user tries to redeem
+        # the same single-use code, it will fail if uses_left becomes 0.
 
         user_db.balance += code.reward
         if code.uses_left != -1: 
@@ -489,7 +478,7 @@ async def claim_daily_bonus(request: Request):
             if user_db.daily_claim_invites >= DAILY_BONUS_INVITE_REQ:
                 user_db.balance += DAILY_BONUS
                 user_db.last_login_date = date.today()
-                user_db.daily_claim_invites = 0 # Reset invites after claiming
+                user_db.daily_claim_invites = 0
                 db_session.commit()
                 await ptb_app.bot.send_message(user_id, f"🎉 Daily bonus of ₱{DAILY_BONUS:.2f} claimed! Come back tomorrow!")
                 logger.info(f"User {user_id} claimed daily bonus.")
@@ -535,10 +524,9 @@ async def submit_withdrawal(request: Request):
         db_session.add(new_withdrawal); user_db.balance -= total_deduction; db_session.commit()
         await ptb_app.bot.send_message(user_id, f"✅ Your withdrawal request for ₱{amount:.2f} (Fee: ₱{fee:.2f}) has been submitted! Our team will review it shortly.")
         
-        # Get user's first name and username for admin notification
         user_tg_obj = None
         try:
-            user_tg_obj = await ptb_app.bot.get_chat(user_id) # Fetch actual Telegram user object
+            user_tg_obj = await ptb_app.bot.get_chat(user_id)
         except Exception as e:
             logger.warning(f"Could not fetch live Telegram user object for {user_id}: {e}")
 
@@ -615,13 +603,12 @@ async def gift_money(request: Request):
         recipient.balance += amount
         db_session.commit()
 
-        # Record gift received event for recipient
-        gift_event_message = f"You received a gift of ₱{amount:.2f} from user {user_id}!"
+        gift_event_message = f"You received a gift of ₱{amount:.2f} from user {sender.first_name or sender.id}!"
         user_event = UserEvent(user_id=recipient_id, event_type='gift_received', message=gift_event_message, related_id=user_id, amount=amount)
         db_session.add(user_event); db_session.commit()
 
         await ptb_app.bot.send_message(user_id, f"✅ You have successfully gifted ₱{amount:.2f} to user {recipient_id}. A fee of ₱{fee:.2f} was applied.")
-        await ptb_app.bot.send_message(recipient_id, f"🎉 You have received a gift of ₱{amount:.2f} from user {user_id}!")
+        await ptb_app.bot.send_message(recipient_id, f"🎉 You have received a gift of ₱{amount:.2f} from user {sender.first_name or sender.id}!")
         logger.info(f"User {user_id} gifted {amount:.2f} to user {recipient_id}.")
         return {"status": "success"}
     except HTTPException as he: 
@@ -646,16 +633,14 @@ async def create_game_room(request: Request):
         if creator.balance < bet_amount:
             raise HTTPException(status_code=400, detail="Insufficient balance to create room.")
         
-        # Check if user is already in an active game
         existing_game = db_session.query(GameRoom).filter(
             or_(GameRoom.creator_id == user_id, GameRoom.opponent_id == user_id),
             GameRoom.status.in_(['waiting_for_opponent', 'in_progress'])
         ).first()
         if existing_game:
-            raise HTTPException(status_code=400, detail=f"You are already in an active game room (ID: {existing_game.id}).")
+            raise HTTPException(status_code=400, detail=f"You are already in an active game room (ID: {existing_game.id}). Please leave it first.")
 
-        # Deduct bet from creator's balance
-        creator.balance -= bet_amount
+        creator.balance -= bet_amount # Deduct bet from creator's balance
 
         new_room = GameRoom(
             room_name=room_name,
@@ -682,12 +667,13 @@ async def list_game_rooms(request: Request):
         
         rooms = db_session.query(GameRoom).filter(
             GameRoom.status == 'waiting_for_opponent',
-            GameRoom.creator_id != user_id # Don't show rooms created by the requesting user
+            GameRoom.creator_id != user_id
         ).all()
 
         room_list = []
         for room in rooms:
-            creator_name = db_session.query(User).filter(User.id == room.creator_id).first().first_name or "Unknown"
+            creator_user = db_session.query(User).filter(User.id == room.creator_id).first()
+            creator_name = creator_user.first_name if creator_user else "Unknown"
             room_list.append({
                 "room_id": room.id,
                 "room_name": room.room_name or f"Room {room.id}",
@@ -712,24 +698,22 @@ async def join_game_room(request: Request):
         if not joiner or joiner.status != 'active':
             raise HTTPException(status_code=403, detail="Account not active or found.")
         if not room:
-            raise HTTPException(status_code=404, detail="Game room not found.")
+            raise HTTPException(status_code=404, detail="Game room not found or no longer exists.")
         if room.creator_id == user_id:
             raise HTTPException(status_code=400, detail="You cannot join your own room.")
         if room.status != 'waiting_for_opponent':
-            raise HTTPException(status_code=400, detail="Room is not waiting for an opponent.")
+            raise HTTPException(status_code=400, detail="Room is not waiting for an opponent. It might have started or been cancelled.")
         if joiner.balance < room.bet_amount:
             raise HTTPException(status_code=400, detail="Insufficient balance to join this room.")
 
-        # Check if user is already in another active game
         existing_game = db_session.query(GameRoom).filter(
             or_(GameRoom.creator_id == user_id, GameRoom.opponent_id == user_id),
             GameRoom.status.in_(['waiting_for_opponent', 'in_progress'])
         ).first()
         if existing_game:
-            raise HTTPException(status_code=400, detail=f"You are already in an active game room (ID: {existing_game.id}).")
+            raise HTTPException(status_code=400, detail=f"You are already in an active game room (ID: {existing_game.id}). Please leave it first.")
 
-        # Deduct bet from joiner's balance
-        joiner.balance -= room.bet_amount
+        joiner.balance -= room.bet_amount # Deduct bet from joiner's balance
 
         room.opponent_id = user_id
         room.status = 'in_progress'
@@ -763,7 +747,7 @@ async def make_game_move(request: Request):
         if not room:
             raise HTTPException(status_code=404, detail="Game room not found.")
         if room.status != 'in_progress':
-            raise HTTPException(status_code=400, detail="Game is not in progress.")
+            raise HTTPException(status_code=400, detail="Game is not in progress or has already finished/cancelled.")
         if user_id not in [room.creator_id, room.opponent_id]:
             raise HTTPException(status_code=403, detail="You are not a participant in this game.")
 
@@ -771,54 +755,54 @@ async def make_game_move(request: Request):
 
         if is_creator:
             if room.creator_move:
-                raise HTTPException(status_code=400, detail="You have already made your move for this round.")
+                raise HTTPException(status_code=400, detail="You have already made your move for this round. Waiting for opponent.")
             room.creator_move = move
         else:
             if room.opponent_move:
-                raise HTTPException(status_code=400, detail="You have already made your move for this round.")
+                raise HTTPException(status_code=400, detail="You have already made your move for this round. Waiting for opponent.")
             room.opponent_move = move
         
         room.updated_at = datetime.utcnow()
         db_session.commit()
 
-        # Resolve round if both players have moved
         round_result_message = ""
+        current_game_status = "in_progress"
+        final_result_message = None
+
+        # Resolve round if both players have moved
         if room.creator_move and room.opponent_move:
             creator_move = room.creator_move
             opponent_move = room.opponent_move
 
-            # Rock-Paper-Scissors Logic
+            creator_name = room.creator.first_name or "Creator"
+            opponent_name = room.opponent.first_name or "Opponent"
+
             if creator_move == opponent_move:
                 round_result_message = "It's a draw!"
             elif (creator_move == 'rock' and opponent_move == 'scissors') or \
                  (creator_move == 'paper' and opponent_move == 'rock') or \
                  (creator_move == 'scissors' and opponent_move == 'paper'):
                 room.creator_score += 1
-                round_result_message = f"{room.creator.first_name} wins the round!"
+                round_result_message = f"{creator_name} wins the round!"
             else:
                 room.opponent_score += 1
-                round_result_message = f"{room.opponent.first_name} wins the round!"
+                round_result_message = f"{opponent_name} wins the round!"
             
-            # Reset moves for next round
-            room.creator_move = None
-            room.opponent_move = None
-            db_session.commit()
-
             # Check for game winner
             winner = None
-            final_result_message = ""
             if room.creator_score >= GAME_TARGET_SCORE:
                 winner = room.creator
-                final_result_message = f"Game Over! {room.creator.first_name} wins the game!"
+                final_result_message = f"Game Over! {winner.first_name} wins the game!"
+                current_game_status = 'finished'
             elif room.opponent_score >= GAME_TARGET_SCORE:
                 winner = room.opponent
-                final_result_message = f"Game Over! {room.opponent.first_name} wins the game!"
+                final_result_message = f"Game Over! {winner.first_name} wins the game!"
+                current_game_status = 'finished'
             
             if winner:
-                room.status = 'finished'
+                room.status = current_game_status
                 room.winner_id = winner.id
                 
-                # Transfer total pot (2 * bet_amount) to winner
                 winnings = room.bet_amount * 2
                 winner.balance += winnings
                 db_session.commit()
@@ -826,16 +810,20 @@ async def make_game_move(request: Request):
                 await ptb_app.bot.send_message(room.creator_id, f"🏆 {final_result_message} You won ₱{winnings:.2f}!")
                 await ptb_app.bot.send_message(room.opponent_id, f"😔 {final_result_message} You lost ₱{room.bet_amount:.2f}.")
                 logger.info(f"Game {room_id} finished. Winner: {winner.id}. Payout: {winnings}.")
-                # Record user event for game win/loss
-                winner_event = UserEvent(user_id=winner.id, event_type='game_won', message=f"You won ₱{winnings:.2f} in a game against {room.opponent.first_name if winner.id == room.creator_id else room.creator.first_name}!", amount=winnings)
-                loser_event = UserEvent(user_id=room.opponent_id if winner.id == room.creator_id else room.creator_id, event_type='game_lost', message=f"You lost ₱{room.bet_amount:.2f} in a game against {winner.first_name}!", amount=-room.bet_amount)
-                db_session.add_all([winner_event, loser_event])
+                
+                # Record user events for game win/loss
+                winner_event = UserEvent(user_id=winner.id, event_type='game_won', message=f"You won ₱{winnings:.2f} in a game against {(room.opponent.first_name if winner.id == room.creator_id else room.creator.first_name) or 'an opponent'}!", related_id=room.id, amount=winnings)
+                loser_id = room.opponent_id if winner.id == room.creator_id else room.creator_id
+                loser_event = UserEvent(user_id=loser_id, event_type='game_lost', message=f"You lost ₱{room.bet_amount:.2f} in a game against {winner.first_name or 'an opponent'}!", related_id=room.id, amount=-room.bet_amount)
+                db_session.add_all([winner_event, loser_event]); db_session.commit()
+            else: # Game continues, reset moves for next round
+                room.creator_move = None
+                room.opponent_move = None
                 db_session.commit()
-            else: # Game continues
                 await ptb_app.bot.send_message(room.creator_id, f"Round Result: {round_result_message} Current Score: {room.creator_score}-{room.opponent_score}. Make your next move!")
                 await ptb_app.bot.send_message(room.opponent_id, f"Round Result: {round_result_message} Current Score: {room.opponent_score}-{room.creator_score}. Make your next move!")
 
-        logger.info(f"User {user_id} made move '{move}' in room {room_id}.")
+        logger.info(f"User {user_id} made move '{move}' in room {room_id}. Game Status: {room.status}")
         return {
             "status": "success", 
             "game_id": room.id, 
@@ -843,12 +831,15 @@ async def make_game_move(request: Request):
             "creator_score": room.creator_score,
             "opponent_score": room.opponent_score,
             "last_round_result": round_result_message,
-            "game_status": room.status,
-            "final_result_message": final_result_message if room.status == 'finished' else None,
+            "game_status": current_game_status,
+            "final_result_message": final_result_message,
             "player_score": room.creator_score if is_creator else room.opponent_score,
             "opponent_score_display": room.opponent_score if is_creator else room.creator_score,
-            "player_move_made": bool(room.creator_move if is_creator else room.opponent_move),
-            "opponent_move_made": bool(room.opponent_move if is_creator else room.creator_move)
+            "your_last_move": creator_move if is_creator else opponent_move, # Your move
+            "opponent_last_move": opponent_move if is_creator else creator_move, # Opponent's move
+            "your_move_made": bool(room.creator_move if is_creator else room.opponent_move),
+            "opponent_move_made": bool(room.opponent_move if is_creator else room.creator_move),
+            "opponent_name": room.opponent.first_name if room.opponent else "Opponent"
         }
     except HTTPException as he:
         db_session.rollback()
@@ -865,7 +856,7 @@ async def get_game_state(request: Request):
         
         room = db_session.query(GameRoom).filter(GameRoom.id == room_id).first()
         if not room:
-            raise HTTPException(status_code=404, detail="Game room not found.")
+            raise HTTPException(status_code=404, detail="Game room not found or already removed.")
         if user_id not in [room.creator_id, room.opponent_id]:
             raise HTTPException(status_code=403, detail="You are not a participant in this game.")
         
@@ -883,7 +874,7 @@ async def get_game_state(request: Request):
         # If game is finished, give final results
         if room.status == 'finished':
             winner_name = room.winner.first_name if room.winner else "Draw"
-            final_message = f"Game Over! {winner_name} wins! Scores: {room.creator_score}-{room.opponent_score}."
+            final_message = f"Game Over! {winner_name} wins! Final Scores: {room.creator_score}-{room.opponent_score}."
             return {
                 "room_id": room.id,
                 "room_name": room.room_name,
@@ -893,7 +884,10 @@ async def get_game_state(request: Request):
                 "player_score": room.creator_score if is_creator else room.opponent_score,
                 "opponent_score_display": room.opponent_score if is_creator else room.creator_score,
                 "winner_name": winner_name,
-                "final_result_message": final_message
+                "final_result_message": final_message,
+                "your_last_move": room.creator_move if is_creator else room.opponent_move,
+                "opponent_last_move": room.opponent_move if is_creator else room.creator_move,
+                "opponent_name": room.opponent.first_name if room.opponent else "Opponent"
             }
 
         return {
@@ -907,9 +901,11 @@ async def get_game_state(request: Request):
             "opponent_score": room.opponent_score,
             "player_score": room.creator_score if is_creator else room.opponent_score,
             "opponent_score_display": room.opponent_score if is_creator else room.creator_score,
-            "player_move_made": bool(room.creator_move if is_creator else room.opponent_move),
+            "your_move_made": bool(room.creator_move if is_creator else room.opponent_move),
             "opponent_move_made": bool(room.opponent_move if is_creator else room.creator_move),
-            "last_round_result": "" # This is for frontend to update
+            "your_last_move": room.creator_move if is_creator else room.opponent_move,
+            "opponent_last_move": room.opponent_move if is_creator else room.creator_move,
+            "opponent_name": room.opponent.first_name if room.opponent else "Opponent"
         }
     except HTTPException as he:
         db_session.rollback()
@@ -926,36 +922,33 @@ async def leave_game_room(request: Request):
         
         room = db_session.query(GameRoom).filter(GameRoom.id == room_id).first()
         if not room:
-            raise HTTPException(status_code=404, detail="Game room not found.")
+            raise HTTPException(status_code=404, detail="Game room not found or already removed.")
         if user_id not in [room.creator_id, room.opponent_id]:
             raise HTTPException(status_code=403, detail="You are not a participant in this game.")
         if room.status == 'finished' or room.status == 'cancelled':
             raise HTTPException(status_code=400, detail="Game is already finished or cancelled.")
 
-        opponent_id_to_notify = None
-        if room.creator_id == user_id:
-            opponent_id_to_notify = room.opponent_id
-        else: # user_id == room.opponent_id
-            opponent_id_to_notify = room.creator_id
+        # Determine who is leaving and who to notify
+        leaving_player_id = user_id
+        opponent_player_id = room.opponent_id if room.creator_id == user_id else room.creator_id
         
-        # Refund the leaving player
-        leaving_player = db_session.query(User).filter(User.id == user_id).first()
-        if leaving_player:
-            leaving_player.balance += room.bet_amount
-            await ptb_app.bot.send_message(user_id, f"You left the game '{room.room_name or room.id}'. Your bet of ₱{room.bet_amount:.2f} has been refunded.")
+        leaving_player_db = db_session.query(User).filter(User.id == leaving_player_id).first()
+        opponent_player_db = db_session.query(User).filter(User.id == opponent_player_id).first()
+
+        # Refund the leaving player (their bet)
+        if leaving_player_db:
+            leaving_player_db.balance += room.bet_amount
+            await ptb_app.bot.send_message(leaving_player_id, f"You left the game '{room.room_name or room.id}'. Your bet of ₱{room.bet_amount:.2f} has been refunded.")
 
         room.status = 'cancelled'
         room.updated_at = datetime.utcnow()
         db_session.commit()
 
-        if opponent_id_to_notify:
-            await ptb_app.bot.send_message(opponent_id_to_notify, f"🚫 Your opponent left the game '{room.room_name or room.id}'. The game has been cancelled.")
-            # Refund opponent if they also put in a bet
-            opponent_player = db_session.query(User).filter(User.id == opponent_id_to_notify).first()
-            if opponent_player:
-                opponent_player.balance += room.bet_amount
-                db_session.commit() # Commit refund
-                await ptb_app.bot.send_message(opponent_id_to_notify, f"Your bet of ₱{room.bet_amount:.2f} has also been refunded.")
+        # Notify opponent and refund their bet if they were in the game
+        if opponent_player_id and opponent_player_db:
+            opponent_player_db.balance += room.bet_amount
+            db_session.commit() # Commit opponent's refund
+            await ptb_app.bot.send_message(opponent_player_id, f"🚫 Your opponent left the game '{room.room_name or room.id}'. The game has been cancelled and your bet of ₱{room.bet_amount:.2f} has been refunded.")
         
         logger.info(f"User {user_id} left game room {room_id}. Game cancelled.")
         return {"status": "success", "message": "Game left and cancelled."}
@@ -974,30 +967,30 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_db = db_session.query(User).filter(User.id == user.id).first()
     
     if not user_db:
-        user_db = User(id=user.id, first_name=user.first_name)
+        user_db = User(id=user.id, first_name=user.first_name, last_name=user.last_name, username=user.username)
         db_session.add(user_db)
         logger.info(f"New user {user.id} ({user.first_name}) registered via start command.")
-    elif user_db.first_name != user.first_name: # Update first name if it changed
+    elif user_db.first_name != user.first_name or user_db.last_name != user.last_name or user_db.username != user.username:
         user_db.first_name = user.first_name
-        logger.info(f"User {user.id} first name updated to {user.first_name}.")
+        user_db.last_name = user.last_name
+        user_db.username = user.username
+        logger.info(f"User {user.id} info updated.")
 
     if context.args:
         try:
             referrer_id = int(context.args[0])
-            # Only assign referrer if not self, referrer exists, and user is new or currently has no referrer
             if referrer_id != user.id and (user_db.referrer_id is None) and db_session.query(User).filter(User.id == referrer_id).first():
                 user_db.referrer_id = referrer_id
                 referrer = db_session.query(User).filter(User.id == referrer_id).first()
-                if referrer: # If referrer exists
+                if referrer:
                     referrer.referral_count += 1
-                    referrer.daily_claim_invites += 1 # Increment invites for daily claim
+                    referrer.daily_claim_invites += 1
                     
-                    # Create UserEvent for referrer
-                    referrer_event_message = f"🎉 {user.first_name} has joined using your link!"
+                    referrer_event_message = f"🎉 {user.first_name or 'A friend'} has joined using your link!"
                     referrer_event = UserEvent(user_id=referrer.id, event_type='referral_join', message=referrer_event_message, related_id=user.id)
                     db_session.add(referrer_event)
 
-                    await context.bot.send_message(chat_id=referrer.id, text=f"🎉 {user.first_name} has joined using your link! Encourage them to complete tasks to earn commissions!")
+                    await context.bot.send_message(chat_id=referrer.id, text=f"🎉 {user.first_name or 'A friend'} has joined using your link! Encourage them to complete tasks to earn commissions!")
                     logger.info(f"User {user.id} (first_name: {user.first_name}) referred by {referrer_id}. Referrer's daily invites incremented.")
                 else:
                     logger.warning(f"Referrer {referrer_id} not found for new user {user.id}.")
@@ -1008,7 +1001,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except (ValueError, IndexError) as e: 
             logger.warning(f"Invalid referrer_id in start command for user {user.id}: {context.args[0]} - {e}")
     
-    db_session.commit() # Commit any user updates (new user or first_name/referrer_id)
+    db_session.commit()
 
     if user_db.status == 'banned': 
         caption = "🚫 You are permanently banned from this bot."; keyboard = []
@@ -1027,7 +1020,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_CHAT_IDS: 
         logger.warning(f"Unauthorized admin access attempt by {update.effective_user.id}.")
-        return # Only ADMIN_CHAT_IDS can use admin commands
+        return 
     
     keyboard = [
         [InlineKeyboardButton("📊 User Stats", callback_data="admin_stats"), InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast")],
@@ -1053,11 +1046,9 @@ async def admin_main_menu_callback(update: Update, context: ContextTypes.DEFAULT
         [InlineKeyboardButton("⚙️ Withdrawal Maintenance", callback_data="admin_maintenance")],
         [InlineKeyboardButton("⚠️ Warn User", callback_data="admin_warn_user")]
     ]
-    # Check if the message is the admin menu message or another message.
-    # If it's a new message, send it. Otherwise, try to edit the current message.
     try:
         await query.message.edit_text("👑 **Xewee Admin Dashboard**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-    except Exception: # Catch if message is not editable (e.g. it's not the initial menu)
+    except Exception:
         await query.message.reply_text("👑 **Xewee Admin Dashboard**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 
@@ -1072,6 +1063,9 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total_balance = sum(u.balance for u in db_session.query(User).all())
     pending_withdrawals = db_session.query(Withdrawal).filter(Withdrawal.status == 'pending').count()
     pending_submissions = db_session.query(TaskSubmission).filter(TaskSubmission.status == 'pending').count()
+    active_game_rooms = db_session.query(GameRoom).filter(GameRoom.status == 'in_progress').count()
+    waiting_game_rooms = db_session.query(GameRoom).filter(GameRoom.status == 'waiting_for_opponent').count()
+
 
     stats_message = (
         f"**📊 Bot Statistics:**\n\n"
@@ -1081,12 +1075,12 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🚧 Restricted Users: {restricted_users}\n"
         f"💰 Total Balance in Circulation: ₱{total_balance:.2f}\n"
         f"💸 Pending Withdrawals: {pending_withdrawals}\n"
-        f"📝 Pending Task Submissions: {pending_submissions}"
+        f"📝 Pending Task Submissions: {pending_submissions}\n"
+        f"🎮 Active Game Rooms: {active_game_rooms}\n"
+        f"🕹️ Waiting Game Rooms: {waiting_game_rooms}"
     )
-    # Add a back button
     keyboard = [[InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]
     await query.message.edit_text(stats_message, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-
 
 # --- Broadcast Conversation ---
 async def broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE): 
@@ -1129,7 +1123,7 @@ async def set_announcement_text(update: Update, context: ContextTypes.DEFAULT_TY
     
     try:
         if update.message.text.lower() == '/clear': 
-            if announcement.value: # Only delete if there was an announcement
+            if announcement.value:
                 db_session.delete(announcement)
                 await update.message.reply_text("Announcement cleared.")
                 logger.info(f"Admin {update.effective_user.id} cleared announcement.")
@@ -1178,7 +1172,7 @@ async def get_task_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_CHAT_IDS: return
     link = update.message.text
     if not link.startswith('http://') and not link.startswith('https://'): 
-        link = 'https://' + link # Ensure absolute link
+        link = 'https://' + link
     context.user_data['task_link'] = link
     await update.message.reply_text("Enter the reward amount (e.g., 50.00):\n\nTo cancel, send /cancel."); 
     return TASK_REWARD
@@ -1230,7 +1224,7 @@ async def delete_task_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             db_session.commit(); 
             await query.answer("Task removed!", show_alert=True); 
             logger.info(f"Admin {query.from_user.id} deleted task {task_id}.")
-            await remove_task_list(update, context) # Refresh list
+            await remove_task_list(update, context)
         except Exception as e:
             db_session.rollback()
             logger.error(f"Error deleting task {task_id}: {e}")
@@ -1238,7 +1232,7 @@ async def delete_task_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             await remove_task_list(update, context)
     else: 
         await query.answer("Task not found.", show_alert=True)
-        await remove_task_list(update, context) # Refresh list in case it was already deleted
+        await remove_task_list(update, context)
 
 # --- Manage Codes ---
 async def manage_codes(update: Update, context: ContextTypes.DEFAULT_TYPE): 
@@ -1328,7 +1322,7 @@ async def delete_code_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             db_session.commit(); 
             await query.answer("Code removed!", show_alert=True); 
             logger.info(f"Admin {query.from_user.id} deleted redeem code {code.code}.")
-            await remove_code_list(update, context) # Refresh list
+            await remove_code_list(update, context)
         except Exception as e:
             db_session.rollback()
             logger.error(f"Error deleting redeem code {code.id}: {e}")
@@ -1336,7 +1330,7 @@ async def delete_code_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             await remove_code_list(update, context)
     else: 
         await query.answer("Code not found.", show_alert=True)
-        await remove_code_list(update, context) # Refresh list
+        await remove_code_list(update, context)
 
 # --- User Management ---
 async def user_mgt_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1368,7 +1362,7 @@ async def user_mgt_id_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['mgt_user_id'] = user_id
     except ValueError: 
         await update.message.reply_text("Invalid User ID. Please enter a numerical ID:"); 
-        return USER_MGT_ID
+        return ConversationHandler.END
     
     if context.user_data['mgt_action'] == 'restrict': 
         await update.message.reply_text("Enter duration in days (e.g., 7):\n\nTo cancel, send /cancel."); 
@@ -1444,38 +1438,40 @@ async def user_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_tg_obj = None
 
     try:
-        # Try to search by ID first
         user_id = int(search_query)
         user_db = db_session.query(User).filter(User.id == user_id).first()
         if user_db:
             try:
                 user_tg_obj = await ptb_app.bot.get_chat(user_db.id)
             except Exception as e:
-                logger.warning(f"Could not fetch live Telegram user object for ID {user_db.id}: {e}")
+                logger.warning(f"Could not fetch Telegram user object for ID {user_db.id}: {e}")
     except ValueError:
-        # If not an ID, try searching by username (need to find a way to map username to ID in DB or TG API)
         username_query = search_query
         if username_query.startswith('@'):
             username_query = username_query[1:]
         
-        # Current DB schema doesn't store Telegram username, so direct DB search won't work efficiently.
-        # Fetching by username from Telegram API (`bot.get_chat(username)`) would return a Chat object.
-        # This can be used to get user_id, then lookup in our DB.
-        try:
-            # This requires the bot to have interacted with the user or the user to be a public channel/group.
-            # It's not guaranteed to work for any random username.
-            user_chat_obj = await ptb_app.bot.get_chat(f"@{username_query}")
-            if user_chat_obj.type == 'private' and user_chat_obj.id: # Ensure it's a private user chat
-                user_db = db_session.query(User).filter(User.id == user_chat_obj.id).first()
-                if user_db:
-                    user_tg_obj = user_chat_obj # Use this for display
-            else:
-                logger.warning(f"Telegram API search for @{username_query} did not yield a private user chat.")
-        except Exception as e:
-            logger.warning(f"Telegram API search for @{username_query} failed: {e}")
+        user_db = db_session.query(User).filter(User.username == username_query).first()
+        if user_db: # Found by username in DB
+            try:
+                user_tg_obj = await ptb_app.bot.get_chat(user_db.id)
+            except Exception as e:
+                logger.warning(f"Could not fetch Telegram user object for DB username match {user_db.id}: {e}")
+        else: # Attempt to find via Telegram API if not in DB
+            try:
+                user_chat_obj = await ptb_app.bot.get_chat(f"@{username_query}")
+                if user_chat_obj.type == 'private' and user_chat_obj.id:
+                    user_db = db_session.query(User).filter(User.id == user_chat_obj.id).first()
+                    if user_db: # Found in DB after API lookup
+                        user_tg_obj = user_chat_obj
+                    else: # User exists in Telegram but not in our DB, create a stub
+                        user_db = User(id=user_chat_obj.id, first_name=user_chat_obj.first_name, last_name=user_chat_obj.last_name, username=user_chat_obj.username)
+                        db_session.add(user_db); db_session.commit()
+                        user_tg_obj = user_chat_obj
+            except Exception as e:
+                logger.warning(f"Telegram API search for @{username_query} failed or not a private chat: {e}")
     
     if user_db:
-        username_display = f"@{user_tg_obj.username}" if user_tg_obj and user_tg_obj.username else "N/A"
+        username_display = f"@{user_db.username}" if user_db.username else (f"@{user_tg_obj.username}" if user_tg_obj and user_tg_obj.username else "N/A")
         first_name_display = user_db.first_name or (user_tg_obj.first_name if user_tg_obj else "Unknown")
         referrer_info = f"Referred by: `{user_db.referrer_id}`" if user_db.referrer_id else "No referrer"
 
@@ -1495,7 +1491,7 @@ async def user_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(user_info_msg, parse_mode='Markdown')
         logger.info(f"Admin {update.effective_user.id} searched for user '{search_query}', found {user_db.id}.")
     else:
-        await update.message.reply_text(f"User '{search_query}' not found by ID or Telegram username (if bot hasn't interacted with them).")
+        await update.message.reply_text(f"User '{search_query}' not found in database or Telegram API.")
         logger.info(f"Admin {update.effective_user.id} searched for user '{search_query}', not found.")
     
     return ConversationHandler.END
@@ -1617,6 +1613,8 @@ async def rain_users_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for user_db in winners: 
             user_db.balance += prize_per_user
             await ptb_app.bot.send_message(user_db.id, f"🎉 You were in the Xewee Rain Prize! You won ₱{prize_per_user:.2f}!")
+            user_event = UserEvent(user_id=user_db.id, event_type='rain_prize_won', message=f"You won ₱{prize_per_user:.2f} in a Rain Prize!", related_id=None, amount=prize_per_user)
+            db_session.add(user_event)
         db_session.commit()
         await update.message.reply_text(f"Rain Prize complete. ₱{amount:.2f} distributed to {num_users} users."); 
         logger.info(f"Admin {update.effective_user.id} distributed rain prize of {amount:.2f} to {num_users} users.")
@@ -1628,14 +1626,12 @@ async def rain_users_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- Review Submissions ---
 async def review_submissions(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # This handler can be called by a callback_query or from another function.
-    # If it's a callback_query, we need to answer it.
     if update.callback_query:
         query = update.callback_query; await query.answer()
         if query.from_user.id not in ADMIN_CHAT_IDS: return
         message_to_edit = query.message
-    else: # Called internally, e.g., after approving/rejecting a submission
-        message_to_edit = context.user_data.get('admin_submission_message') # Get the original message object to edit
+    else:
+        message_to_edit = context.user_data.get('admin_submission_message')
 
     submission = db_session.query(TaskSubmission).filter(TaskSubmission.status == 'pending').first()
     if not submission: 
@@ -1643,7 +1639,6 @@ async def review_submissions(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await message_to_edit.edit_text("No pending submissions to review.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]))
         else:
             await context.bot.send_message(update.effective_chat.id, "No pending submissions to review.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]))
-        # Clean up stored message ID
         if 'admin_submission_message' in context.user_data:
             del context.user_data['admin_submission_message']
         return
@@ -1653,15 +1648,15 @@ async def review_submissions(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     if not user_db or not task:
         logger.error(f"Review Submission: User ({submission.user_id}) or task ({submission.task_id}) not found for submission ID {submission.id}. Marking as rejected.")
-        submission.status = 'rejected'; db_session.commit()
+        submission.status = 'rejected'; submission.rejection_reason = "User or task not found."
+        db_session.commit()
         if message_to_edit:
             await message_to_edit.edit_text(f"Skipping submission {submission.id}: Associated user or task not found. Checking next...", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Next Submission", callback_data="admin_pending_submissions")]]))
         else:
             await context.bot.send_message(update.effective_chat.id, f"Skipping submission {submission.id}: Associated user or task not found. Checking next...", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Next Submission", callback_data="admin_pending_submissions")]]))
-        await review_submissions(update, context) # Recursively call to get the next submission
+        await review_submissions(update, context)
         return
 
-    # Fetch live Telegram user object for up-to-date username/first_name
     user_tg_obj = None
     try:
         user_tg_obj = await ptb_app.bot.get_chat(user_db.id)
@@ -1674,15 +1669,13 @@ async def review_submissions(update: Update, context: ContextTypes.DEFAULT_TYPE)
     caption_text = f"**Submission Review (ID: {submission.id})**\n\n- User: {first_name_display} (`{user_db.id}`){f' {username_display}' if username_display != 'N/A' else ''}\n- Task: {task.description}\n- Reward: ₱{task.reward:.2f}\n- Note: {submission.text_proof}\n\nSubmitted on: {submission.created_at.strftime('%Y-%m-%d')}"
     keyboard = [[InlineKeyboardButton("Approve ✅", callback_data=f"approve_sub_{submission.id}"), InlineKeyboardButton("Reject ❌", callback_data=f"reject_sub_start_{submission.id}")]]
     
-    # Store the original message object to edit it later
     context.user_data['admin_submission_message'] = message_to_edit
     
     try:
-        photo_data = base64.b64decode(submission.photo_proof_base64.split(',')[1])
+        photo_data = base64.b64decode(submission.photo_proof_base64.split(',',1)[1]) # Use split(',',1) to handle potential commas in base64 prefix
         
-        # Determine if we need to edit a photo message or send a new one
-        if message_to_edit and message_to_edit.photo: # If the current message already has a photo
-            if message_to_edit.caption != caption_text: # Only edit if caption changed
+        if message_to_edit and message_to_edit.photo:
+            if message_to_edit.caption != caption_text:
                 await message_to_edit.edit_media(
                     media=InputFile(BytesIO(photo_data), filename=f"submission_{submission.id}.png"), 
                     reply_markup=InlineKeyboardMarkup(keyboard),
@@ -1691,24 +1684,23 @@ async def review_submissions(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 )
             else:
                 logger.info(f"Submission {submission.id} photo message caption not modified, skipping edit media.")
-        elif message_to_edit and message_to_edit.text: # If current message is text, and we now have a photo
-            await message_to_edit.delete() # Delete old text message
-            message_to_edit = await context.bot.send_photo(chat_id=update.effective_chat.id, photo=BytesIO(photo_data), caption=caption_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-            context.user_data['admin_submission_message'] = message_to_edit # Update stored message
-        else: # Initial message or no previous message to edit
-            message_to_edit = await context.bot.send_photo(chat_id=update.effective_chat.id, photo=BytesIO(photo_data), caption=caption_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-            context.user_data['admin_submission_message'] = message_to_edit # Store new message
+        elif message_to_edit and message_to_edit.text:
+            await message_to_edit.delete()
+            message_to_edit = await context.bot.send_photo(chat_id=update.effective_chat.id, photo=InputFile(BytesIO(photo_data), filename=f"submission_{submission.id}.png"), caption=caption_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            context.user_data['admin_submission_message'] = message_to_edit
+        else:
+            message_to_edit = await context.bot.send_photo(chat_id=update.effective_chat.id, photo=InputFile(BytesIO(photo_data), filename=f"submission_{submission.id}.png"), caption=caption_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            context.user_data['admin_submission_message'] = message_to_edit
         
     except Exception as e:
         logger.error(f"Failed to display photo for submission {submission.id}: {e}. Sending as text instead.")
-        # If photo fails, send as text and log error
         new_text_content = caption_text + "\n\n*(Failed to display image proof)*"
         if message_to_edit:
             if message_to_edit.text != new_text_content or message_to_edit.reply_markup != InlineKeyboardMarkup(keyboard):
                 await message_to_edit.edit_text(new_text_content, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
             else:
                 logger.info(f"Submission {submission.id} text message content not modified, skipping edit.")
-        else: # Send new text message if no previous message to edit
+        else:
             message_to_edit = await context.bot.send_message(update.effective_chat.id, new_text_content, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
             context.user_data['admin_submission_message'] = message_to_edit
 
@@ -1720,9 +1712,7 @@ async def approve_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
     sub_id = int(query.data.split("_")[2]); 
     submission = db_session.query(TaskSubmission).filter(TaskSubmission.id == sub_id).first()
     
-    # Check if submission is still pending
     if not submission or submission.status != 'pending': 
-        # Get the current message content
         current_caption = query.message.caption if query.message.caption else ""
         new_caption = f"{current_caption}\n\n**Status: Already processed.**"
         if current_caption != new_caption:
@@ -1734,7 +1724,6 @@ async def approve_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_db = db_session.query(User).filter(User.id == submission.user_id).first() 
     task = db_session.query(Task).filter(Task.id == submission.task_id).first()
     
-    # Defensive checks
     if not user_db or user_db.status != 'active':
         submission.status = 'rejected' 
         submission.rejection_reason = "User account not active."
@@ -1746,7 +1735,7 @@ async def approve_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
         else:
             logger.info(f"Admin message for submission {sub_id} already shows rejected. Skipping edit.")
         logger.warning(f"Submission {sub_id} rejected: User {submission.user_id} not active or found.")
-        await review_submissions(update, context) # Show next pending submission
+        await review_submissions(update, context)
         return
     if not task:
         submission.status = 'rejected' 
@@ -1759,10 +1748,9 @@ async def approve_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
         else:
             logger.info(f"Admin message for submission {sub_id} already shows rejected. Skipping edit.")
         logger.warning(f"Submission {sub_id} rejected: Task {submission.task_id} not found.")
-        await review_submissions(update, context) # Show next pending submission
+        await review_submissions(update, context)
         return
 
-    # Set submission status to approved
     submission.status = 'approved'
     
     try:
@@ -1773,16 +1761,14 @@ async def approve_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
             completed_task_ids_list.append(task.id)
             user_db.completed_task_ids = json.dumps(completed_task_ids_list)
 
-            # --- REFERRAL COMMISSION LOGIC ---
             if user_db.referrer_id: 
                 referrer = db_session.query(User).filter(User.id == user_db.referrer_id).first()
                 if referrer and referrer.status == 'active': 
                     commission_amount = task.reward * REFERRAL_COMMISSION_PERCENT
                     referrer.balance += commission_amount
-                    if user_db.tasks_completed == 1: # Only on the first task ever completed by the referred user
+                    if user_db.tasks_completed == 1:
                         referrer.successful_referrals += 1
                     
-                    # Create UserEvent for referrer
                     referrer_event_message = f"Your referred friend {user_db.first_name} completed a task ('{task.description}') and you earned ₱{commission_amount:.2f}!"
                     referrer_event = UserEvent(user_id=referrer.id, event_type='referral_commission', message=referrer_event_message, related_id=user_db.id, amount=commission_amount)
                     db_session.add(referrer_event)
@@ -1796,9 +1782,7 @@ async def approve_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     logger.info(f"Referrer {referrer.id} for user {user_db.id} is not active, no commission awarded.")
                 else:
                     logger.warning(f"Referrer {user_db.referrer_id} not found for user {user_db.id}.")
-            # --- END REFERRAL COMMISSION LOGIC ---
             
-            # Check and award Task Milestones
             claimed_milestones = json.loads(user_db.claimed_milestones) if user_db.claimed_milestones else {}
             for milestone_str, reward_amount in TASK_MILESTONES.items():
                 milestone = int(milestone_str.split('_')[0]) 
@@ -1819,19 +1803,18 @@ async def approve_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         current_caption = query.message.caption if query.message.caption else ""
         new_caption = f"{current_caption}\n\n**Status: APPROVED**"
-        # Check if message is already modified to avoid BadRequest
         if current_caption != new_caption:
             await query.edit_message_caption(caption=new_caption, parse_mode='Markdown')
         else:
             logger.info(f"Admin message for submission {sub_id} already shows APPROVED. Skipping edit.")
 
-        await review_submissions(update, context) # Show next pending submission
+        await review_submissions(update, context)
 
     except Exception as e:
         db_session.rollback()
         logger.error(f"Error approving submission {sub_id} for user {user_db.id}: {e}", exc_info=True)
         await query.message.reply_text(f"An error occurred while approving submission {sub_id}. Funds might be rolled back.")
-        await review_submissions(update, context) # Try to continue
+        await review_submissions(update, context)
 
 
 async def reject_submission_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1851,7 +1834,6 @@ async def reject_submission_start(update: Update, context: ContextTypes.DEFAULT_
         return
 
     context.user_data['submission_id_to_reject'] = sub_id
-    # Store the original message caption for later editing
     context.user_data['original_submission_caption'] = query.message.caption if query.message.caption else ""
     await query.message.reply_text("Please provide a brief reason for rejecting this submission (or send /skip for no reason).\n\nTo cancel, send /cancel."); 
     return SUBMIT_TASK_REJECT_REASON
@@ -1860,7 +1842,7 @@ async def get_submission_rejection_reason(update: Update, context: ContextTypes.
     if update.effective_user.id not in ADMIN_CHAT_IDS: return
 
     sub_id = context.user_data.get('submission_id_to_reject')
-    original_caption = context.user_data.get('original_submission_caption', "Submission Review") # Default if not found
+    original_caption = context.user_data.get('original_submission_caption', "Submission Review")
     submission = db_session.query(TaskSubmission).filter(TaskSubmission.id == sub_id).first()
     
     if not submission or submission.status != 'pending': 
@@ -1871,7 +1853,7 @@ async def get_submission_rejection_reason(update: Update, context: ContextTypes.
     
     try:
         submission.status = 'rejected'; 
-        submission.rejection_reason = reason # Save rejection reason
+        submission.rejection_reason = reason
         db_session.commit()
         await update.message.reply_text(f"❌ Submission #{sub_id} has been rejected.")
         task = db_session.query(Task).filter(Task.id == submission.task_id).first()
@@ -1879,11 +1861,9 @@ async def get_submission_rejection_reason(update: Update, context: ContextTypes.
         await ptb_app.bot.send_message(chat_id=submission.user_id, text=f"⚠️ Your submission for '{task_description}' was rejected.\n\n**Admin's Remark:** {reason}", parse_mode='Markdown')
         logger.info(f"Admin {update.effective_user.id} rejected submission {sub_id} for user {submission.user_id}.")
 
-        # Edit the original admin message to show rejected status
         admin_message_to_edit = context.user_data.get('admin_submission_message')
         if admin_message_to_edit:
             new_caption = f"{original_caption}\n\n**Status: REJECTED**\nReason: {reason}"
-            # Check if message is already modified to avoid BadRequest
             if admin_message_to_edit.caption != new_caption:
                 await admin_message_to_edit.edit_caption(caption=new_caption, parse_mode='Markdown')
             else:
@@ -1894,7 +1874,7 @@ async def get_submission_rejection_reason(update: Update, context: ContextTypes.
         logger.error(f"Error rejecting submission {sub_id}: {e}", exc_info=True)
         await update.message.reply_text("An error occurred while rejecting the submission.")
 
-    await review_submissions(update, context) # Show next pending submission
+    await review_submissions(update, context)
     return ConversationHandler.END
 
 # --- Withdrawal Handlers ---
@@ -1906,7 +1886,6 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
     withdrawal = db_session.query(Withdrawal).filter(Withdrawal.id == wd_id).first()
     
     if not withdrawal or withdrawal.status != "pending": 
-        # Safely get current message content (text or caption)
         message_content = query.message.text if query.message.text else query.message.caption if query.message.caption else ""
         new_content = f"{message_content}\n\n**Status: Already processed.**"
         if message_content != new_content:
@@ -1919,7 +1898,6 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
         withdrawal.status = "approved"; 
         db_session.commit(); 
         
-        # Safely get current message content (text or caption)
         message_content = query.message.text if query.message.text else query.message.caption if query.message.caption else ""
         new_content = f"{message_content}\n\n✅ **Request #{wd_id} approved.**"
         if message_content != new_content:
@@ -1927,7 +1905,7 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
         else:
             logger.info(f"Admin message for withdrawal {wd_id} already shows approved. Skipping edit.")
         
-        await ptb_app.bot.send_message(chat_id=withdrawal.user_id, text=f"🎉 Good news! Your withdrawal of ₱{withdrawal.amount:.2f} has been approved and sent via {withdrawal.method}.")
+        await ptb_app.bot.send_message(chat_id=withdrawal.user_id, text=f"🎉 Good news! Your withdrawal of ₱{withdrawal.amount:.2f} has been approved and sent.")
         logger.info(f"Admin {query.from_user.id} approved withdrawal {wd_id} for user {withdrawal.user_id}.")
     except Exception as e:
         db_session.rollback()
@@ -1952,9 +1930,7 @@ async def reject_withdrawal_start(update: Update, context: ContextTypes.DEFAULT_
         return
 
     context.user_data['withdrawal_id_to_reject'] = wd_id
-    # Store the original message text/caption for later editing
     context.user_data['original_withdrawal_message_content'] = query.message.text if query.message.text else query.message.caption if query.message.caption else ""
-    # Store the message object itself to edit it later (since context.user_data is per-user for conversations)
     context.user_data['admin_withdrawal_message_object'] = query.message
     await query.message.reply_text("Please provide a brief reason for rejecting this withdrawal (or send /skip).\n\nTo cancel, send /cancel."); 
     return REJECT_REASON_WD
@@ -1975,18 +1951,17 @@ async def get_withdrawal_rejection_reason(update: Update, context: ContextTypes.
     
     try:
         if withdrawal.status == 'pending' and user_db:
-            user_db.balance += withdrawal.amount + withdrawal.fee # Return full amount deducted
+            user_db.balance += withdrawal.amount + withdrawal.fee
             await ptb_app.bot.send_message(chat_id=user_db.id, text=f"⚠️ Your withdrawal request of ₱{withdrawal.amount:.2f} was rejected and the amount returned to your balance.\n\n**Admin's Remark:** {reason}", parse_mode='Markdown')
         elif not user_db:
             logger.warning(f"User {withdrawal.user_id} not found for withdrawal {wd_id}, cannot return funds.")
         
         withdrawal.status = "rejected"; 
-        withdrawal.rejection_reason = reason # Save rejection reason
+        withdrawal.rejection_reason = reason
         db_session.commit()
         await update.message.reply_text(f"❌ Request #{wd_id} has been rejected.")
         logger.info(f"Admin {update.effective_user.id} rejected withdrawal {wd_id} for user {withdrawal.user_id}.")
 
-        # Edit the original admin message to show rejected status
         admin_message_to_edit = context.user_data.get('admin_withdrawal_message_object')
         if admin_message_to_edit:
             new_content = f"{original_content}\n\n❌ **Request #{wd_id} rejected.**\nReason: {reason}"
@@ -2014,7 +1989,6 @@ async def maintenance_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]
     
     new_message_text = f"Withdrawal Maintenance is currently {current_status_text}"
-    # Check if message is already modified to avoid BadRequest
     if query.message.text != new_message_text or query.message.reply_markup != InlineKeyboardMarkup(keyboard):
         await query.message.edit_text(new_message_text, reply_markup=InlineKeyboardMarkup(keyboard))
     else:
@@ -2040,7 +2014,6 @@ async def toggle_maintenance_mode(update: Update, context: ContextTypes.DEFAULT_
                     [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]
         
         new_message_text = f"Withdrawal Maintenance is now {status_text}"
-        # Check if message is already modified to avoid BadRequest
         if query.message.text != new_message_text or query.message.reply_markup != InlineKeyboardMarkup(keyboard):
             await query.message.edit_text(new_message_text, reply_markup=InlineKeyboardMarkup(keyboard))
         else:
@@ -2070,7 +2043,7 @@ async def get_warn_user_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['warn_user_id'] = user_id
     except ValueError: 
         await update.message.reply_text("Invalid User ID. Please enter a numerical ID:"); 
-        return WARN_USER_ID
+        return ConversationHandler.END
     await update.message.reply_text("Send the warning message/reason:\n\nTo cancel, send /cancel."); 
     return WARN_REASON
 
@@ -2096,8 +2069,7 @@ async def send_warn_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_CHAT_IDS: return
     await update.message.reply_text("Operation cancelled.")
-    # Clear user_data for this conversation
-    if context.user_data: # Ensure user_data exists
+    if context.user_data:
         context.user_data.clear()
     return ConversationHandler.END
 
@@ -2105,10 +2077,8 @@ async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE
 ptb_app.add_handler(CommandHandler("start", start_command))
 ptb_app.add_handler(CommandHandler("admin", admin_command))
 
-# Global cancel command for conversations
 cancel_handler = CommandHandler("cancel", cancel_conversation)
 
-# Conversations
 ptb_app.add_handler(ConversationHandler(
     entry_points=[CallbackQueryHandler(broadcast_start, pattern="^admin_broadcast$")], 
     states={BROADCAST_MESSAGE: [MessageHandler(filters.ALL & ~filters.COMMAND, broadcast_message)]}, 
@@ -2180,7 +2150,6 @@ ptb_app.add_handler(ConversationHandler(
     fallbacks=[cancel_handler], 
     per_user=True, per_chat=False
 ))
-# New Admin Conversations
 ptb_app.add_handler(ConversationHandler(
     entry_points=[CallbackQueryHandler(user_search_start, pattern="^admin_user_search$")],
     states={USER_SEARCH_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, user_search_input)]},
