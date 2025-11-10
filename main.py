@@ -18,7 +18,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 BOT_TOKEN = "8085121840:AAHGpim6s0j8FU8yZ5jSiyu6Ol51Rdgod8E"  # Get this from @BotFather
 BOT_USERNAME = "XeweeBot"             # Your bot's @username (without the @)
 ADMIN_CHAT_IDS: Tuple[int, ...] = (7588209802, 6780778947) # Your Super Admin Telegram User IDs (can be multiple)
-MINI_APP_URL = "https://your-xewee-frontend.vercel.app" # Your Vercel frontend URL - *** IMPORTANT: REPLACE WITH YOUR ACTUAL FRONTEND URL! ***
+MINI_APP_URL = "https://82628273728-app-frontend-seven.vercel.app" # Your Vercel frontend URL - *** IMPORTANT: REPLACE WITH YOUR ACTUAL FRONTEND URL! ***
 # ------------------------------------
 
 # --- Xewee Feature Constants ---
@@ -372,9 +372,9 @@ async def mark_notifications_as_read(request: Request):
         if not user_db:
             raise HTTPException(status_code=404, detail="User not found.")
 
-        db_session.query(TaskSubmission).filter(TaskSubmission.user_id == user_id).update({"is_read": True})
-        db_session.query(Withdrawal).filter(Withdrawal.user_id == user_id).update({"is_read": True})
-        db_session.query(UserEvent).filter(UserEvent.user_id == user_id).update({"is_read": True})
+        db_session.query(TaskSubmission).filter(TaskSubmission.user_id == user_id, TaskSubmission.is_read == False).update({"is_read": True})
+        db_session.query(Withdrawal).filter(Withdrawal.user_id == user_id, Withdrawal.is_read == False).update({"is_read": True})
+        db_session.query(UserEvent).filter(UserEvent.user_id == user_id, UserEvent.is_read == False).update({"is_read": True})
         
         db_session.commit()
         logger.info(f"User {user_id} marked all notifications as read.")
@@ -782,12 +782,10 @@ async def make_game_move(request: Request):
         current_game_status = "in_progress"
         final_result_message = None
 
-        # Resolve round if both players have moved
         if room.creator_move and room.opponent_move:
             creator_name = room.creator.first_name or "Creator"
             opponent_name = room.opponent.first_name or "Opponent"
 
-            # Rock-Paper-Scissors Logic
             if room.creator_move == room.opponent_move:
                 round_result_message = "It's a draw!"
             elif (room.creator_move == 'rock' and room.opponent_move == 'scissors') or \
@@ -799,7 +797,6 @@ async def make_game_move(request: Request):
                 room.opponent_score += 1
                 round_result_message = f"{opponent_name} wins the round!"
             
-            # Check for game winner
             winner = None
             if room.creator_score >= GAME_TARGET_SCORE:
                 winner = room.creator
@@ -877,16 +874,14 @@ async def get_game_state(request: Request):
         
         is_creator = (user_id == room.creator_id)
 
-        # Basic cleanup for old/stuck rooms
         if room.status == 'waiting_for_opponent' and (datetime.utcnow() - room.created_at).total_seconds() > GAME_ROOM_INACTIVITY_TIMEOUT_MIN * 60:
             room.status = 'cancelled'
-            room.creator.balance += room.bet_amount # Refund creator
+            room.creator.balance += room.bet_amount
             db_session.commit()
             await ptb_app.bot.send_message(room.creator_id, f"🚫 Your game room '{room.room_name or room.id}' was cancelled due to inactivity.")
             logger.info(f"Game room {room_id} cancelled due to inactivity.")
             raise HTTPException(status_code=404, detail="Game ended due to inactivity.")
         
-        # If game is finished, give final results
         if room.status == 'finished':
             winner_name = room.winner.first_name if room.winner else "Draw"
             final_message = f"Game Over! {winner_name} wins! Final Scores: {room.creator_score}-{room.opponent_score}."
@@ -1197,15 +1192,17 @@ async def get_task_reward(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if reward <= 0:
             await update.message.reply_text("Reward must be a positive number. Please try again:");
             return TASK_REWARD
+        
+        # Correctly add the task after all validations
         db_session.add(Task(description=context.user_data['task_desc'], link=context.user_data['task_link'], reward=reward))
-        db_session.commit(); 
+        db_session.commit() 
         await update.message.reply_text("✅ Task added!"); 
         logger.info(f"Admin {update.effective_user.id} added task: {context.user_data['task_desc']}.")
         return ConversationHandler.END
     except ValueError: 
         await update.message.reply_text("Invalid amount. Please enter a number (e.g., 50.00):"); 
         return TASK_REWARD
-    except Exception as e:
+    except Exception as e: # Catch any unexpected errors during task addition
         db_session.rollback()
         logger.error(f"Error adding task: {e}")
         await update.message.reply_text("An error occurred while adding the task.")
@@ -1282,7 +1279,7 @@ async def get_new_code_reward(update: Update, context: ContextTypes.DEFAULT_TYPE
             return NEW_CODE_REWARD
         context.user_data['new_code_reward'] = reward
         await update.message.reply_text("Enter uses left (-1 for unlimited, 1 for single-use):\n\nTo cancel, send /cancel."); 
-    return NEW_CODE_USES
+        return NEW_CODE_USES 
     except ValueError: 
         await update.message.reply_text("Invalid amount. Please enter a number (e.g., 100.00):"); 
         return NEW_CODE_REWARD
@@ -1464,19 +1461,19 @@ async def user_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             username_query = username_query[1:]
         
         user_db = db_session.query(User).filter(User.username == username_query).first()
-        if user_db: # Found by username in DB
+        if user_db:
             try:
                 user_tg_obj = await ptb_app.bot.get_chat(user_db.id)
             except Exception as e:
                 logger.warning(f"Could not fetch Telegram user object for DB username match {user_db.id}: {e}")
-        else: # Attempt to find via Telegram API if not in DB
+        else:
             try:
                 user_chat_obj = await ptb_app.bot.get_chat(f"@{username_query}")
                 if user_chat_obj.type == 'private' and user_chat_obj.id:
                     user_db = db_session.query(User).filter(User.id == user_chat_obj.id).first()
-                    if user_db: # Found in DB after API lookup
+                    if user_db:
                         user_tg_obj = user_chat_obj
-                    else: # User exists in Telegram but not in our DB, create a stub
+                    else:
                         user_db = User(id=user_chat_obj.id, first_name=user_chat_obj.first_name, last_name=user_chat_obj.last_name, username=user_chat_obj.username)
                         db_session.add(user_db); db_session.commit()
                         user_tg_obj = user_chat_obj
@@ -1598,7 +1595,7 @@ async def rain_amount_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['rain_amount'] = amount
     except ValueError: 
         await update.message.reply_text("Invalid amount. Please enter a number:"); 
-        return RAIN_AMOUNT
+        return ConversationHandler.END
     await update.message.reply_text("Send the number of users to share the prize pool with (e.g., 10):\n\nTo cancel, send /cancel."); 
     return RAIN_USERS
 
