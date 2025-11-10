@@ -14,26 +14,29 @@ from sqlalchemy import create_engine, Column, Integer, BigInteger, String, Float
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
 # --- Configuration ---
-BOT_TOKEN = "8085121840:AAHGpim6s0j8FU8yZ5jSiyu6Ol51Rdgod8E"
-BOT_USERNAME = "XeweeBot"
-ADMIN_CHAT_IDS: Tuple[int, ...] = (7588209802, 6780778947)
-MINI_APP_URL = "https://82628273728-app-frontend-seven.vercel.app" # IMPORTANT: REPLACE WITH YOUR VERCEL FRONTEND URL!
+# *** IMPORTANT: REPLACE THESE WITH YOUR ACTUAL VALUES ***
+BOT_TOKEN = "8085121840:AAHGpim6s0j8FU8yZ5jSiyu6Ol51Rdgod8E"  # Get this from @BotFather
+BOT_USERNAME = "XeweeBot"             # Your bot's @username (without the @)
+ADMIN_CHAT_IDS: Tuple[int, ...] = (7588209802, 6780778947) # Your Super Admin Telegram User IDs (can be multiple)
+MINI_APP_URL = "https://82628273728-app-frontend-seven.vercel.app" # Your Vercel frontend URL - *** REMEMBER TO UPDATE THIS! ***
+# ------------------------------------
 
 # --- Xewee Feature Constants ---
-REFERRAL_COMMISSION_PERCENT = 0.10
-MIN_WITHDRAWAL = 300.0
-MAX_WITHDRAWAL = 30000.0
-WITHDRAWAL_FEE_PERCENT = 0.03
+REFERRAL_COMMISSION_PERCENT = 0.10  # 10% commission on referred user's task reward
 
-DAILY_BONUS = 10.0
-DAILY_BONUS_INVITE_REQ = 2
+MIN_WITHDRAWAL = 300.0              # Minimum amount a user can withdraw
+MAX_WITHDRAWAL = 30000.0            # Maximum amount a user can withdraw
+WITHDRAWAL_FEE_PERCENT = 0.03       # 3% fee on withdrawals
 
-TASK_MILESTONES = {"10_tasks": 50.0, "20_tasks": 150.0, "30_tasks": 400.0}
+DAILY_BONUS = 10.0                  # Amount for daily login bonus
+DAILY_BONUS_INVITE_REQ = 2          # Number of new invites required since last claim for daily bonus
 
-GIFT_TICKET_PRICE = 10.0
-GIFT_MIN_AMOUNT = 30.0
+TASK_MILESTONES = {"10_tasks": 50.0, "20_tasks": 150.0, "30_tasks": 400.0} # Bonus rewards for completing tasks
+
+GIFT_TICKET_PRICE = 10.0            # Price per Gift Ticket
+GIFT_MIN_AMOUNT = 30.0              # Minimum amount a user can gift
 GIFT_MAX_AMOUNT = 80000.0
-GIFT_FEE_PERCENT = 0.05
+GIFT_FEE_PERCENT = 0.05             # 5% fee on gifted amount
 
 GAME_ROOM_INACTIVITY_TIMEOUT_MIN = 60 # Minutes before an unjoined or stagnant game room is cancelled
 GAME_TARGET_SCORE = 3 # First player to reach this score wins
@@ -47,22 +50,22 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = "users"
     id = Column(BigInteger, primary_key=True, autoincrement=False)
-    first_name = Column(String, nullable=True)
+    first_name = Column(String, nullable=True) # Storing first name for better messages
     last_name = Column(String, nullable=True) # Added for more complete user info
     username = Column(String, nullable=True) # Added to easily retrieve for games/notifications
     balance = Column(Float, default=0.0)
     gift_tickets = Column(Integer, default=0)
-    referral_count = Column(Integer, default=0)
-    successful_referrals = Column(Integer, default=0)
-    tasks_completed = Column(Integer, default=0)
-    completed_task_ids = Column(Text, default="[]")
+    referral_count = Column(Integer, default=0) # Total referred users
+    successful_referrals = Column(Integer, default=0) # Referred users who completed at least one task
+    tasks_completed = Column(Integer, default=0) # Total tasks completed by user
+    completed_task_ids = Column(Text, default="[]") # JSON list of task IDs completed by this user
     referrer_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)
-    status = Column(String, default="active")
-    status_until = Column(Date, nullable=True)
-    last_login_date = Column(Date, nullable=True)
-    daily_claim_invites = Column(Integer, default=0)
-    claimed_milestones = Column(Text, default="{}")
-    
+    status = Column(String, default="active") # active, banned, restricted
+    status_until = Column(Date, nullable=True) # For temporary restrictions
+    last_login_date = Column(Date, nullable=True) # For daily bonus claim
+    daily_claim_invites = Column(Integer, default=0) # Invites since last daily claim
+    claimed_milestones = Column(Text, default="{}") # JSON string for task milestones claimed
+    # Relationships for convenience
     created_game_rooms = relationship("GameRoom", foreign_keys="[GameRoom.creator_id]", back_populates="creator")
     joined_game_rooms = relationship("GameRoom", foreign_keys="[GameRoom.opponent_id]", back_populates="opponent")
     # No back_populates for winner to avoid circular references if not strictly needed in User model
@@ -82,10 +85,10 @@ class TaskSubmission(Base):
     task_id = Column(Integer)
     text_proof = Column(Text)
     photo_proof_base64 = Column(Text)
-    status = Column(String, default="pending")
-    rejection_reason = Column(Text, nullable=True)
+    status = Column(String, default="pending") # pending, approved, rejected
+    rejection_reason = Column(Text, nullable=True) # Added for more detail
     created_at = Column(Date, default=date.today())
-    is_read = Column(Boolean, default=False)
+    is_read = Column(Boolean, default=False) # For new notification system
 
 class Withdrawal(Base):
     __tablename__ = "withdrawals"
@@ -95,28 +98,28 @@ class Withdrawal(Base):
     fee = Column(Float, default=0.0)
     method = Column(String)
     details = Column(String)
-    status = Column(String, default="pending")
-    rejection_reason = Column(Text, nullable=True)
+    status = Column(String, default="pending") # pending, approved, rejected
+    rejection_reason = Column(Text, nullable=True) # Added for more detail
     created_at = Column(Date, default=date.today())
-    is_read = Column(Boolean, default=False)
+    is_read = Column(Boolean, default=False) # For new notification system
 
 class RedeemCode(Base):
     __tablename__ = "redeem_codes"
     id = Column(Integer, primary_key=True)
     code = Column(String, unique=True)
     reward = Column(Float)
-    uses_left = Column(Integer, default=1)
+    uses_left = Column(Integer, default=1) # -1 for unlimited
 
 class SystemInfo(Base):
     __tablename__ = "system_info"
     key = Column(String, primary_key=True)
     value = Column(String)
 
-class UserEvent(Base):
+class UserEvent(Base): # For generic notifications like referrals, gifts
     __tablename__ = "user_events"
     id = Column(Integer, primary_key=True)
     user_id = Column(BigInteger, ForeignKey("users.id"))
-    event_type = Column(String) # e.g., 'referral_join', 'gift_received', 'game_won', 'game_lost'
+    event_type = Column(String) # e.g., 'referral_join', 'gift_received', 'game_won', 'game_lost', 'rain_prize_won'
     message = Column(Text)
     related_id = Column(BigInteger, nullable=True) # e.g., referrer_id, sender_id, game_id
     amount = Column(Float, nullable=True) # e.g., gift amount, commission amount
@@ -141,8 +144,7 @@ class GameRoom(Base):
 
     creator = relationship("User", foreign_keys=[creator_id], back_populates="created_game_rooms")
     opponent = relationship("User", foreign_keys=[opponent_id], back_populates="joined_game_rooms")
-    winner = relationship("User", foreign_keys=[winner_id])
-
+    winner = relationship("User", foreign_keys=[winner_id]) # No back_populates to avoid recursive relationship for winner
 
 # Database connection for Railway (PostgreSQL) or local (SQLite)
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///xewee_data.db")
@@ -195,7 +197,6 @@ async def get_initial_data(request: Request):
         
         user_db = db_session.query(User).filter(User.id == user_id).first()
         if not user_db:
-            # Attempt to get full user details from Telegram API if available
             tg_user_info = None
             try:
                 tg_chat = await ptb_app.bot.get_chat(user_id)
@@ -212,6 +213,22 @@ async def get_initial_data(request: Request):
             db_session.add(user_db); db_session.commit()
             logger.info(f"New user {user_id} created via get_initial_data.")
         
+        # Always try to update user's Telegram info on login for freshness
+        tg_user_info = None
+        try:
+            tg_chat = await ptb_app.bot.get_chat(user_id)
+            tg_user_info = tg_chat
+            if user_db.first_name != tg_user_info.first_name or \
+               user_db.last_name != tg_user_info.last_name or \
+               user_db.username != tg_user_info.username:
+                user_db.first_name = tg_user_info.first_name
+                user_db.last_name = tg_user_info.last_name
+                user_db.username = tg_user_info.username
+                db_session.commit()
+                logger.info(f"User {user_id} Telegram info updated on get_initial_data.")
+        except Exception as e:
+            logger.warning(f"Could not update Telegram user info for {user_id}: {e}")
+
         # Check user status for Mini App access
         if user_db.status == 'banned': 
             logger.info(f"User {user_id} attempted to access Mini App but is banned.")
@@ -417,7 +434,7 @@ async def submit_task_proof(request: Request):
         caption = f"**New Task Submission for Review**\n\n- User: {user_info_for_admin}\n- Task: {task_description}\n- Reward: ₱{task_reward:.2f}\n- Note: {text}"
         keyboard = [[InlineKeyboardButton("Approve ✅", callback_data=f"approve_sub_{submission.id}"), InlineKeyboardButton("Reject ❌", callback_data=f"reject_sub_start_{submission.id}")]]
         
-        photo_data = base64.b64decode(photo_base64.split(',')[1])
+        photo_data = base64.b64decode(photo_base64.split(',',1)[1]) # Use split(',',1)
         for admin_id in ADMIN_CHAT_IDS:
             try:
                 await ptb_app.bot.send_photo(chat_id=admin_id, photo=BytesIO(photo_data), caption=caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -447,10 +464,6 @@ async def redeem_code(request: Request):
         
         if not code or (code.uses_left != -1 and code.uses_left <= 0):
             raise HTTPException(status_code=400, detail="Invalid or expired code.")
-
-        # For single-use codes (uses_left = 1), you might want to track who used it.
-        # For simplicity here, we just decrement uses_left. If a user tries to redeem
-        # the same single-use code, it will fail if uses_left becomes 0.
 
         user_db.balance += code.reward
         if code.uses_left != -1: 
@@ -771,17 +784,15 @@ async def make_game_move(request: Request):
 
         # Resolve round if both players have moved
         if room.creator_move and room.opponent_move:
-            creator_move = room.creator_move
-            opponent_move = room.opponent_move
-
             creator_name = room.creator.first_name or "Creator"
             opponent_name = room.opponent.first_name or "Opponent"
 
-            if creator_move == opponent_move:
+            # Rock-Paper-Scissors Logic
+            if room.creator_move == room.opponent_move:
                 round_result_message = "It's a draw!"
-            elif (creator_move == 'rock' and opponent_move == 'scissors') or \
-                 (creator_move == 'paper' and opponent_move == 'rock') or \
-                 (creator_move == 'scissors' and opponent_move == 'paper'):
+            elif (room.creator_move == 'rock' and room.opponent_move == 'scissors') or \
+                 (room.creator_move == 'paper' and room.opponent_move == 'rock') or \
+                 (room.creator_move == 'scissors' and room.opponent_move == 'paper'):
                 room.creator_score += 1
                 round_result_message = f"{creator_name} wins the round!"
             else:
@@ -792,11 +803,11 @@ async def make_game_move(request: Request):
             winner = None
             if room.creator_score >= GAME_TARGET_SCORE:
                 winner = room.creator
-                final_result_message = f"Game Over! {winner.first_name} wins the game!"
+                final_result_message = f"Game Over! {winner.first_name or 'Creator'} wins the game!"
                 current_game_status = 'finished'
             elif room.opponent_score >= GAME_TARGET_SCORE:
                 winner = room.opponent
-                final_result_message = f"Game Over! {winner.first_name} wins the game!"
+                final_result_message = f"Game Over! {winner.first_name or 'Opponent'} wins the game!"
                 current_game_status = 'finished'
             
             if winner:
@@ -807,14 +818,19 @@ async def make_game_move(request: Request):
                 winner.balance += winnings
                 db_session.commit()
 
+                # Notify players and record events
                 await ptb_app.bot.send_message(room.creator_id, f"🏆 {final_result_message} You won ₱{winnings:.2f}!")
                 await ptb_app.bot.send_message(room.opponent_id, f"😔 {final_result_message} You lost ₱{room.bet_amount:.2f}.")
                 logger.info(f"Game {room_id} finished. Winner: {winner.id}. Payout: {winnings}.")
                 
-                # Record user events for game win/loss
-                winner_event = UserEvent(user_id=winner.id, event_type='game_won', message=f"You won ₱{winnings:.2f} in a game against {(room.opponent.first_name if winner.id == room.creator_id else room.creator.first_name) or 'an opponent'}!", related_id=room.id, amount=winnings)
+                winner_event_msg = f"You won ₱{winnings:.2f} in a game against {(room.opponent.first_name if winner.id == room.creator_id else room.creator.first_name) or 'an opponent'}!"
+                winner_event = UserEvent(user_id=winner.id, event_type='game_won', message=winner_event_msg, related_id=room.id, amount=winnings)
+                
                 loser_id = room.opponent_id if winner.id == room.creator_id else room.creator_id
-                loser_event = UserEvent(user_id=loser_id, event_type='game_lost', message=f"You lost ₱{room.bet_amount:.2f} in a game against {winner.first_name or 'an opponent'}!", related_id=room.id, amount=-room.bet_amount)
+                loser_name = (room.opponent.first_name if loser_id == room.opponent_id else room.creator.first_name) or 'an opponent'
+                loser_event_msg = f"You lost ₱{room.bet_amount:.2f} in a game against {winner.first_name or 'an opponent'}!"
+                loser_event = UserEvent(user_id=loser_id, event_type='game_lost', message=loser_event_msg, related_id=room.id, amount=-room.bet_amount)
+                
                 db_session.add_all([winner_event, loser_event]); db_session.commit()
             else: # Game continues, reset moves for next round
                 room.creator_move = None
@@ -835,8 +851,8 @@ async def make_game_move(request: Request):
             "final_result_message": final_result_message,
             "player_score": room.creator_score if is_creator else room.opponent_score,
             "opponent_score_display": room.opponent_score if is_creator else room.creator_score,
-            "your_last_move": creator_move if is_creator else opponent_move, # Your move
-            "opponent_last_move": opponent_move if is_creator else creator_move, # Opponent's move
+            "your_last_move": room.creator_move if is_creator else room.opponent_move,
+            "opponent_last_move": room.opponent_move if is_creator else room.creator_move,
             "your_move_made": bool(room.creator_move if is_creator else room.opponent_move),
             "opponent_move_made": bool(room.opponent_move if is_creator else room.creator_move),
             "opponent_name": room.opponent.first_name if room.opponent else "Opponent"
@@ -905,7 +921,7 @@ async def get_game_state(request: Request):
             "opponent_move_made": bool(room.opponent_move if is_creator else room.creator_move),
             "your_last_move": room.creator_move if is_creator else room.opponent_move,
             "opponent_last_move": room.opponent_move if is_creator else room.creator_move,
-            "opponent_name": room.opponent.first_name if room.opponent else "Opponent"
+            "opponent_name": room.opponent.first_name if room.opponent else "Opponent" # Ensure opponent name is passed
         }
     except HTTPException as he:
         db_session.rollback()
@@ -974,6 +990,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_db.first_name = user.first_name
         user_db.last_name = user.last_name
         user_db.username = user.username
+        db_session.commit()
         logger.info(f"User {user.id} info updated.")
 
     if context.args:
@@ -1403,7 +1420,7 @@ async def user_mgt_duration_input(update: Update, context: ContextTypes.DEFAULT_
         user_id = context.user_data['mgt_user_id']
     except ValueError: 
         await update.message.reply_text("Invalid duration. Please enter a number of days:"); 
-        return USER_MGT_DURATION
+        return ConversationHandler.END
     
     user_db = db_session.query(User).filter(User.id == user_id).first() 
     if not user_db: 
@@ -1517,7 +1534,7 @@ async def get_adjust_balance_id(update: Update, context: ContextTypes.DEFAULT_TY
         return ADJUST_BALANCE_AMOUNT
     except ValueError:
         await update.message.reply_text("Invalid User ID. Please enter a numerical ID:");
-        return ADJUST_BALANCE_ID
+        return ConversationHandler.END
 
 async def get_adjust_balance_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_CHAT_IDS: return
@@ -1570,7 +1587,7 @@ async def confirm_adjust_balance(update: Update, context: ContextTypes.DEFAULT_T
 
 # --- Rain Prize ---
 async def rain_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query; await query.answer(); 
+    query = update.callback_query; await query.answer()
     if query.from_user.id not in ADMIN_CHAT_IDS: return
     await query.message.reply_text("Send the total amount to distribute (e.g., 500):\n\nTo cancel, send /cancel."); 
     return RAIN_AMOUNT
@@ -1599,7 +1616,7 @@ async def rain_users_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         amount = context.user_data['rain_amount']
     except ValueError: 
         await update.message.reply_text("Invalid number. Please enter an integer:"); 
-        return RAIN_USERS
+        return ConversationHandler.END
     
     eligible_users = db_session.query(User).filter(User.status == 'active').all()
     if len(eligible_users) < num_users: 
@@ -1672,7 +1689,7 @@ async def review_submissions(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data['admin_submission_message'] = message_to_edit
     
     try:
-        photo_data = base64.b64decode(submission.photo_proof_base64.split(',',1)[1]) # Use split(',',1) to handle potential commas in base64 prefix
+        photo_data = base64.b64decode(submission.photo_proof_base64.split(',',1)[1])
         
         if message_to_edit and message_to_edit.photo:
             if message_to_edit.caption != caption_text:
@@ -1769,13 +1786,13 @@ async def approve_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     if user_db.tasks_completed == 1:
                         referrer.successful_referrals += 1
                     
-                    referrer_event_message = f"Your referred friend {user_db.first_name} completed a task ('{task.description}') and you earned ₱{commission_amount:.2f}!"
+                    referrer_event_message = f"Your referred friend {user_db.first_name or 'A friend'} completed a task ('{task.description}') and you earned ₱{commission_amount:.2f}!"
                     referrer_event = UserEvent(user_id=referrer.id, event_type='referral_commission', message=referrer_event_message, related_id=user_db.id, amount=commission_amount)
                     db_session.add(referrer_event)
 
                     await ptb_app.bot.send_message(
                         referrer.id, 
-                        f"🎉 Your referred friend {user_db.first_name} completed a task ('{task.description}') and you earned ₱{commission_amount:.2f} ({(REFERRAL_COMMISSION_PERCENT*100):.0f}% commission)!"
+                        f"🎉 Your referred friend {user_db.first_name or 'A friend'} completed a task ('{task.description}') and you earned ₱{commission_amount:.2f} ({(REFERRAL_COMMISSION_PERCENT*100):.0f}% commission)!"
                     )
                     logger.info(f"Referral commission of {commission_amount} given to {referrer.id} for {user_db.id}'s task {task.id}.")
                 elif referrer:
