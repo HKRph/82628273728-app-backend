@@ -157,7 +157,7 @@ engine = create_engine(DATABASE_URL); Base.metadata.create_all(engine); Session 
 TASK_DESC, TASK_LINK, TASK_REWARD, REJECT_REASON_WD, BROADCAST_MESSAGE, ANNOUNCEMENT_TEXT, \
 NEW_CODE_CODE, NEW_CODE_REWARD, NEW_CODE_USES, USER_MGT_ID, USER_MGT_ACTION, USER_MGT_DURATION, \
 RAIN_AMOUNT, RAIN_USERS, SUBMIT_TASK_REJECT_REASON, DELETE_TASK, DELETE_CODE, WARN_USER_ID, \
-WARN_REASON, USER_SEARCH_INPUT, ADJUST_BALANCE_ID, ADJUST_BALANCE_AMOUNT, ADJUST_BALANCE_CONFIRM = range(23) # CORRECTED: range(23) because there are 23 states (0-22)
+WARN_REASON, USER_SEARCH_INPUT, ADJUST_BALANCE_ID, ADJUST_BALANCE_AMOUNT, ADJUST_BALANCE_CONFIRM = range(23)
 
 # --- Bot & API Lifespan ---
 ptb_app = Application.builder().token(BOT_TOKEN).build()
@@ -166,8 +166,6 @@ ptb_app = Application.builder().token(BOT_TOKEN).build()
 async def lifespan(app: FastAPI):
     logger.info("Lifespan startup...")
     # Increase httpx default timeout for Telegram API calls
-    # This is a bit of a hack as httpx is used internally by python-telegram-bot
-    # A more robust solution might involve configuring the ApplicationBuilder's HTTPXClient.
     import httpx
     httpx._client.DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=10.0) # 30s total, 10s connect
 
@@ -188,7 +186,9 @@ app.add_middleware(
 )
 
 # --- Helper to get user's first name, trying DB first, then Telegram API ---
-async def get_user_first_name_display(user_id: int) -> str:
+async def get_user_first_name_display(user_id: Optional[int]) -> str:
+    if user_id is None:
+        return "Unknown"
     user_db = db_session.query(User).filter(User.id == user_id).first()
     if user_db and user_db.first_name and user_db.first_name != 'Unknown':
         return user_db.first_name
@@ -273,10 +273,10 @@ async def get_initial_data(request: Request):
             "active_game_bet_amount": active_game_room.bet_amount if active_game_room else None
         }
     except HTTPException as he: 
-        db_session.rollback() # Rollback any potential changes
+        db_session.rollback() 
         raise he
     except Exception as e:
-        db_session.rollback() # Rollback any potential changes
+        db_session.rollback() 
         logger.error(f"API Error in get_initial_data for user {user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -386,11 +386,8 @@ async def mark_notifications_as_read(request: Request):
         if not user_db:
             raise HTTPException(status_code=404, detail="User not found.")
 
-        # Mark Task Submissions as read
         db_session.query(TaskSubmission).filter(TaskSubmission.user_id == user_id).update({"is_read": True})
-        # Mark Withdrawals as read
         db_session.query(Withdrawal).filter(Withdrawal.user_id == user_id).update({"is_read": True})
-        # Mark User Events as read
         db_session.query(UserEvent).filter(UserEvent.user_id == user_id).update({"is_read": True})
         
         db_session.commit()
@@ -414,12 +411,10 @@ async def submit_task_proof(request: Request):
         if not user_db or user_db.status != 'active': 
             raise HTTPException(status_code=403, detail="Account not active or found.")
         
-        # Prevent submitting for an already completed task
         completed_task_ids_list = json.loads(user_db.completed_task_ids) if user_db.completed_task_ids else []
         if task_id in completed_task_ids_list:
             raise HTTPException(status_code=400, detail="You have already completed this task.")
 
-        # Prevent multiple pending submissions for the same task
         existing_pending_submission = db_session.query(TaskSubmission).filter(
             TaskSubmission.user_id == user_id, 
             TaskSubmission.task_id == task_id, 
@@ -635,7 +630,6 @@ async def gift_money(request: Request):
         recipient.balance += amount
         db_session.commit()
 
-        # Record gift received event for recipient
         sender_name = await get_user_first_name_display(user_id)
         gift_event_data = {'sender_id': user_id, 'sender_name': sender_name, 'amount': amount}
         user_event = UserEvent(user_id=recipient_id, event_type='gift_received', data_json=json.dumps(gift_event_data), related_id=user_id, amount=amount)
@@ -759,7 +753,7 @@ async def join_game_room(request: Request):
         await ptb_app.bot.send_message(room.creator_id, f"🎉 An opponent ({joiner_name_display}) has joined your room '{room.room_name or room.id}'! Game starts now!")
         
         logger.info(f"User {user_id} joined game room {room_id}. Game in progress.")
-        return {"status": "success", "room_id": room.id, "room_name": room.room_name or f"Room {room.id}", "creator_name": creator_name_display, "opponent_name": joiner_name_display}
+        return {"status": "success", "room_id": room.id, "room_name": room.room_name or f"Room {room.id}", "creator_name": creator_name_display, "opponent_name": joiner_name_display, "bet_amount": room.bet_amount}
     except HTTPException as he:
         db_session.rollback()
         raise he
@@ -883,10 +877,11 @@ async def make_game_move(request: Request):
             "opponent_name": opponent_name_display,
             "player_id": user_id,
             "player_first_name": await get_user_first_name_display(user_id),
-            "creator_last_move": creator_move, # Last move made in the round
-            "opponent_last_move": opponent_move, # Last move made in the round
-            "player_move_made": bool(room.creator_move if is_creator else room.opponent_move), # If player has already made a move for the *current* round (None after round ends)
-            "opponent_move_made": bool(room.opponent_move if is_creator else room.creator_move) # If opponent has already made a move for the *current* round
+            "creator_last_move": room.creator_move, # Last move made in the current (or just finished) round
+            "opponent_last_move": room.opponent_move, # Last move made in the current (or just finished) round
+            "player_move_made": bool(room.creator_move if is_creator else room.opponent_move), 
+            "opponent_move_made": bool(room.opponent_move if is_creator else room.creator_move),
+            "current_player_id": user_id
         }
     except HTTPException as he:
         db_session.rollback()
@@ -909,7 +904,6 @@ async def get_game_state(request: Request):
         
         is_creator = (user_id == room.creator_id)
 
-        # Basic cleanup for old/stuck rooms
         if room.status == 'waiting_for_opponent' and (datetime.utcnow() - room.created_at).total_seconds() > GAME_ROOM_INACTIVITY_TIMEOUT_MIN * 60:
             room.status = 'cancelled'
             room.creator.balance += room.bet_amount # Refund creator
@@ -942,12 +936,12 @@ async def get_game_state(request: Request):
             "opponent_score_display": room.opponent_score if is_creator else room.creator_score,
             "player_move_made": bool(room.creator_move if is_creator else room.opponent_move),
             "opponent_move_made": bool(room.opponent_move if is_creator else room.creator_move),
-            "last_round_result": "", # Frontend will handle this based on polling
+            "last_round_result": "", 
             "final_result_message": final_result_message,
             "creator_name": creator_name_display,
             "opponent_name": opponent_name_display,
-            "player_last_move": room.creator_move if is_creator else room.opponent_move,
-            "opponent_last_move": room.opponent_move if is_creator else room.creator_move,
+            "player_last_move": room.creator_move if is_creator else room.opponent_move, # Pass current moves
+            "opponent_last_move": room.opponent_move if is_creator else room.creator_move, # Pass current moves
             "current_player_id": user_id
         }
     except HTTPException as he:
@@ -988,9 +982,9 @@ async def leave_game_room(request: Request):
         db_session.commit()
 
         if opponent_id_to_notify:
-            opponent_name_display = await get_user_first_name_display(user_id) # The one who left
+            opponent_name_display = await get_user_first_name_display(user_id) 
             await ptb_app.bot.send_message(opponent_id_to_notify, f"🚫 Your opponent ({opponent_name_display}) left the game '{room.room_name or room.id}'. The game has been cancelled.")
-            # Refund opponent if they also put in a bet
+            
             opponent_player = db_session.query(User).filter(User.id == opponent_id_to_notify).first()
             if opponent_player and room.opponent_id: # Only refund if opponent actually joined and put a bet
                 opponent_player.balance += room.bet_amount
@@ -1017,22 +1011,20 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_db = User(id=user.id, first_name=user.first_name)
         db_session.add(user_db)
         logger.info(f"New user {user.id} ({user.first_name}) registered via start command.")
-    elif user_db.first_name != user.first_name: # Update first name if it changed
+    elif user_db.first_name != user.first_name: 
         user_db.first_name = user.first_name
         logger.info(f"User {user.id} first name updated to {user.first_name}.")
 
     if context.args:
         try:
             referrer_id = int(context.args[0])
-            # Only assign referrer if not self, referrer exists, and user is new or currently has no referrer
             if referrer_id != user.id and (user_db.referrer_id is None) and db_session.query(User).filter(User.id == referrer_id).first():
                 user_db.referrer_id = referrer_id
                 referrer = db_session.query(User).filter(User.id == referrer_id).first()
-                if referrer: # If referrer exists
+                if referrer: 
                     referrer.referral_count += 1
-                    referrer.daily_claim_invites += 1 # Increment invites for daily claim
+                    referrer.daily_claim_invites += 1 
                     
-                    # Create UserEvent for referrer
                     friend_name = user.first_name or "A new user"
                     referrer_event_data = {'friend_id': user.id, 'friend_name': friend_name}
                     referrer_event = UserEvent(user_id=referrer.id, event_type='referral_join', data_json=json.dumps(referrer_event_data), related_id=user.id)
@@ -1049,7 +1041,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except (ValueError, IndexError) as e: 
             logger.warning(f"Invalid referrer_id in start command for user {user.id}: {context.args[0]} - {e}")
     
-    db_session.commit() # Commit any user updates (new user or first_name/referrer_id)
+    db_session.commit() 
 
     if user_db.status == 'banned': 
         caption = "🚫 You are permanently banned from this bot."; keyboard = []
@@ -1068,7 +1060,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_CHAT_IDS: 
         logger.warning(f"Unauthorized admin access attempt by {update.effective_user.id}.")
-        return # Only ADMIN_CHAT_IDS can use admin commands
+        return 
     
     keyboard = [
         [InlineKeyboardButton("📊 User Stats", callback_data="admin_stats"), InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast")],
@@ -1094,7 +1086,7 @@ async def admin_main_menu_callback(update: Update, context: ContextTypes.DEFAULT
         [InlineKeyboardButton("⚙️ Withdrawal Maintenance", callback_data="admin_maintenance")],
         [InlineKeyboardButton("⚠️ Warn User", callback_data="admin_warn_user")]
     ]
-    try: # Try to edit the message if possible to avoid sending a new one
+    try: 
         await query.message.edit_text("👑 **Xewee Admin Dashboard**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
     except Exception: 
         await query.message.reply_text("👑 **Xewee Admin Dashboard**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -1122,12 +1114,10 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💸 Pending Withdrawals: {pending_withdrawals}\n"
         f"📝 Pending Task Submissions: {pending_submissions}"
     )
-    # Add a back button
     keyboard = [[InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]
     await query.message.edit_text(stats_message, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 
-# --- Broadcast Conversation ---
 async def broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE): 
     query = update.callback_query; await query.answer()
     if query.from_user.id not in ADMIN_CHAT_IDS: return
@@ -1150,7 +1140,6 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Broadcast sent to {sent_count} active users. Failed for {failed_count} users."); 
     return ConversationHandler.END
 
-# --- Announcement Conversation ---
 async def announcement_start(update: Update, context: ContextTypes.DEFAULT_TYPE): 
     query = update.callback_query; await query.answer()
     if query.from_user.id not in ADMIN_CHAT_IDS: return
@@ -1188,7 +1177,6 @@ async def set_announcement_text(update: Update, context: ContextTypes.DEFAULT_TY
 
     return ConversationHandler.END
 
-# --- Manage Tasks ---
 async def manage_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE): 
     query = update.callback_query; await query.answer(); 
     if query.from_user.id not in ADMIN_CHAT_IDS: return
@@ -1217,7 +1205,7 @@ async def get_task_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_CHAT_IDS: return
     link = update.message.text
     if not link.startswith('http://') and not link.startswith('https://'): 
-        link = 'https://' + link # Ensure absolute link
+        link = 'https://' + link 
     context.user_data['task_link'] = link
     await update.message.reply_text("Enter the reward amount (e.g., 50.00):\n\nTo cancel, send /cancel."); 
     return TASK_REWARD
@@ -1269,7 +1257,7 @@ async def delete_task_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             db_session.commit(); 
             await query.answer("Task removed!", show_alert=True); 
             logger.info(f"Admin {query.from_user.id} deleted task {task_id}.")
-            await remove_task_list(update, context) # Refresh list
+            await remove_task_list(update, context) 
         except Exception as e:
             db_session.rollback()
             logger.error(f"Error deleting task {task_id}: {e}")
@@ -1279,7 +1267,6 @@ async def delete_task_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.answer("Task not found.", show_alert=True)
         await remove_task_list(update, context) 
 
-# --- Manage Codes ---
 async def manage_codes(update: Update, context: ContextTypes.DEFAULT_TYPE): 
     query = update.callback_query; await query.answer(); 
     if query.from_user.id not in ADMIN_CHAT_IDS: return
@@ -1314,7 +1301,15 @@ async def get_new_code_reward(update: Update, context: ContextTypes.DEFAULT_TYPE
             return NEW_CODE_REWARD
         context.user_data['new_code_reward'] = reward
         await update.message.reply_text("Enter uses left (-1 for unlimited, 1 for single-use):\n\nTo cancel, send /cancel."); 
-    return NEW_CODE_USES
+        return NEW_CODE_USES # FIX: Indentation here was causing SyntaxError
+    except ValueError: 
+        await update.message.reply_text("Invalid amount. Please enter a number (e.g., 100.00):"); 
+        return NEW_CODE_REWARD
+    except Exception as e:
+        db_session.rollback()
+        logger.error(f"Error adding redeem code: {e}")
+        await update.message.reply_text("An error occurred while adding the redeem code.")
+        return ConversationHandler.END
 
 async def get_new_code_uses(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_CHAT_IDS: return
@@ -1364,7 +1359,7 @@ async def delete_code_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             db_session.commit(); 
             await query.answer("Code removed!", show_alert=True); 
             logger.info(f"Admin {query.from_user.id} deleted redeem code {code.code}.")
-            await remove_code_list(update, context) # Refresh list
+            await remove_code_list(update, context) 
         except Exception as e:
             db_session.rollback()
             logger.error(f"Error deleting redeem code {code.id}: {e}")
@@ -1374,7 +1369,6 @@ async def delete_code_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.answer("Code not found.", show_alert=True)
         await remove_code_list(update, context) 
 
-# --- User Management ---
 async def user_mgt_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer()
     if query.from_user.id not in ADMIN_CHAT_IDS: return
@@ -1465,7 +1459,6 @@ async def user_mgt_duration_input(update: Update, context: ContextTypes.DEFAULT_
 
     return ConversationHandler.END
 
-# --- User Search ---
 async def user_search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer()
     if query.from_user.id not in ADMIN_CHAT_IDS: return
@@ -1480,7 +1473,7 @@ async def user_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_tg_obj = None
 
     try:
-        user_id_int = int(search_query) # Try converting to int (for User ID)
+        user_id_int = int(search_query) 
         user_db = db_session.query(User).filter(User.id == user_id_int).first()
         if user_db:
             try:
@@ -1488,25 +1481,22 @@ async def user_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logger.warning(f"Could not fetch live Telegram user object for ID {user_db.id}: {e}")
     except ValueError:
-        # If not an integer, try searching by username
         username_query = search_query
         if username_query.startswith('@'):
             username_query = username_query[1:]
         
         try:
-            # Try to get chat by username from Telegram API
             user_chat_obj = await ptb_app.bot.get_chat(f"@{username_query}")
-            if user_chat_obj.type == 'private' and user_chat_obj.id:
+            if user_chat_obj.type == 'private' and user_chat_obj.id: 
                 user_id_from_tg = user_chat_obj.id
                 user_db = db_session.query(User).filter(User.id == user_id_from_tg).first()
-                if user_db: # Found in DB using ID from Telegram API
-                    user_tg_obj = user_chat_obj # Use this for display details
-                else: # User exists in Telegram but not in our DB
+                if user_db: 
+                    user_tg_obj = user_chat_obj 
+                else: 
                     user_db = User(id=user_id_from_tg, first_name=user_chat_obj.first_name)
                     db_session.add(user_db)
                     db_session.commit()
                     user_tg_obj = user_chat_obj
-                    logger.info(f"User {user_id_from_tg} ({user_chat_obj.first_name}) added to DB after username search.")
 
             else:
                 logger.warning(f"Telegram API search for @{username_query} did not yield a private user chat. Type: {user_chat_obj.type}")
@@ -1540,7 +1530,6 @@ async def user_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-# --- Adjust Balance ---
 async def adjust_balance_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer()
     if query.from_user.id not in ADMIN_CHAT_IDS: return
@@ -1611,7 +1600,6 @@ async def confirm_adjust_balance(update: Update, context: ContextTypes.DEFAULT_T
     return ConversationHandler.END
 
 
-# --- Rain Prize ---
 async def rain_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer(); 
     if query.from_user.id not in ADMIN_CHAT_IDS: return
@@ -1665,13 +1653,12 @@ async def rain_users_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("An error occurred during rain prize distribution. Funds were rolled back.")
     return ConversationHandler.END
 
-# --- Review Submissions ---
 async def review_submissions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         query = update.callback_query; await query.answer()
         if query.from_user.id not in ADMIN_CHAT_IDS: return
         message_to_edit = query.message
-    else: # Called internally, e.g., after approving/rejecting a submission
+    else: 
         message_to_edit = context.user_data.get('admin_submission_message')
 
     submission = db_session.query(TaskSubmission).filter(TaskSubmission.status == 'pending').first()
@@ -1706,7 +1693,7 @@ async def review_submissions(update: Update, context: ContextTypes.DEFAULT_TYPE)
     username_display = f"@{user_tg_obj.username}" if user_tg_obj and user_tg_obj.username else "N/A"
     first_name_display = user_db.first_name or (user_tg_obj.first_name if user_tg_obj else "Unknown")
     
-    caption_text = f"**Submission Review (ID: {submission.id})**\n\n- User: {first_name_display} (`{user_db.id}`){f' {username_display}' if username_display != 'N/A' else ''}\n- Task: {task.description}\n-- Reward: ₱{task.reward:.2f}\n- Note: {submission.text_proof}\n\nSubmitted on: {submission.created_at.strftime('%Y-%m-%d')}"
+    caption_text = f"**Submission Review (ID: {submission.id})**\n\n- User: {first_name_display} (`{user_db.id}`){f' {username_display}' if username_display != 'N/A' else ''}\n- Task: {task.description}\n- Reward: ₱{task.reward:.2f}\n- Note: {submission.text_proof}\n\nSubmitted on: {submission.created_at.strftime('%Y-%m-%d')}"
     keyboard = [[InlineKeyboardButton("Approve ✅", callback_data=f"approve_sub_{submission.id}"), InlineKeyboardButton("Reject ❌", callback_data=f"reject_sub_start_{submission.id}")]]
     
     context.user_data['admin_submission_message'] = message_to_edit
@@ -1921,7 +1908,6 @@ async def get_submission_rejection_reason(update: Update, context: ContextTypes.
     await review_submissions(update, context) 
     return ConversationHandler.END
 
-# --- Withdrawal Handlers ---
 async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer()
     if query.from_user.id not in ADMIN_CHAT_IDS: return
@@ -2020,7 +2006,6 @@ async def get_withdrawal_rejection_reason(update: Update, context: ContextTypes.
 
     return ConversationHandler.END
 
-# --- Maintenance Mode Toggle ---
 async def maintenance_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer()
     if query.from_user.id not in ADMIN_CHAT_IDS: return
@@ -2070,7 +2055,6 @@ async def toggle_maintenance_mode(update: Update, context: ContextTypes.DEFAULT_
         await query.message.reply_text("An error occurred while toggling maintenance mode.")
 
 
-# --- Warn User Conversation ---
 async def warn_user_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer(); 
     if query.from_user.id not in ADMIN_CHAT_IDS: return
@@ -2109,7 +2093,6 @@ async def send_warn_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-# --- Conversation Cancellation Handler ---
 async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_CHAT_IDS: return
     await update.message.reply_text("Operation cancelled.")
@@ -2117,14 +2100,11 @@ async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data.clear()
     return ConversationHandler.END
 
-# --- Add Handlers to the PTB Application ---
 ptb_app.add_handler(CommandHandler("start", start_command))
 ptb_app.add_handler(CommandHandler("admin", admin_command))
 
-# Global cancel command for conversations
 cancel_handler = CommandHandler("cancel", cancel_conversation)
 
-# Conversations
 ptb_app.add_handler(ConversationHandler(
     entry_points=[CallbackQueryHandler(broadcast_start, pattern="^admin_broadcast$")], 
     states={BROADCAST_MESSAGE: [MessageHandler(filters.ALL & ~filters.COMMAND, broadcast_message)]}, 
@@ -2196,7 +2176,6 @@ ptb_app.add_handler(ConversationHandler(
     fallbacks=[cancel_handler], 
     per_user=True, per_chat=False
 ))
-# New Admin Conversations
 ptb_app.add_handler(ConversationHandler(
     entry_points=[CallbackQueryHandler(user_search_start, pattern="^admin_user_search$")],
     states={USER_SEARCH_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, user_search_input)]},
@@ -2215,7 +2194,6 @@ ptb_app.add_handler(ConversationHandler(
 ))
 
 
-# Callback Query Handlers (non-conversation specific)
 ptb_app.add_handler(CallbackQueryHandler(admin_main_menu_callback, pattern="^admin_main_menu$"))
 ptb_app.add_handler(CallbackQueryHandler(admin_stats, pattern="^admin_stats$"))
 ptb_app.add_handler(CallbackQueryHandler(manage_tasks, pattern="^admin_manage_tasks$"))
@@ -2232,7 +2210,6 @@ ptb_app.add_handler(CallbackQueryHandler(maintenance_start, pattern="^admin_main
 ptb_app.add_handler(CallbackQueryHandler(toggle_maintenance_mode, pattern="^toggle_maintenance$"))
 
 
-# --- Main Entry ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
