@@ -152,7 +152,7 @@ if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1) # SQLAlchemy expects postgresql://
 
 # Configure connection pool for better performance and resource management
-engine = create_engine(DATABASE_URL, pool_size=10, max_overflow=20); # Increased pool size
+engine = create_engine(DATABASE_URL, pool_size=10, max_overflow=20); 
 Base.metadata.create_all(engine); 
 Session = sessionmaker(bind=engine); 
 
@@ -169,9 +169,9 @@ ptb_app = Application.builder().token(BOT_TOKEN).build()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Lifespan startup...")
-    # Increase httpx default timeout for Telegram API calls
+    # Increase httpx default timeout for Telegram API calls (used internally by python-telegram-bot)
     import httpx
-    httpx._client.DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=10.0) # 30s total, 10s connect
+    httpx._client.DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=10.0) 
 
     await ptb_app.initialize()
     await ptb_app.updater.start_polling(drop_pending_updates=True) 
@@ -193,7 +193,7 @@ app.add_middleware(
 async def get_user_first_name_display(user_id: Optional[int]) -> str:
     if user_id is None:
         return "Unknown"
-    with Session() as session: # Use a new session for helper to avoid conflicts
+    with Session() as session: 
         user_db = session.query(User).filter(User.id == user_id).first()
         if user_db and user_db.first_name and user_db.first_name != 'Unknown':
             return user_db.first_name
@@ -859,7 +859,6 @@ async def make_game_move(request: Request):
                 creator_move = room.creator_move
                 opponent_move = room.opponent_move
 
-                # Rock-Paper-Scissors Logic
                 if creator_move == opponent_move:
                     round_result_message = "It's a draw!"
                 elif (creator_move == 'rock' and opponent_move == 'scissors') or \
@@ -1065,7 +1064,6 @@ async def leave_game_room(request: Request):
             raise HTTPException(status_code=500, detail="Internal server error")
 
 
-# --- Telegram Handlers ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with Session() as session:
         user = update.effective_user
@@ -1120,7 +1118,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Failed to send start message to user {user.id}: {e}")
 
-# --- Admin Panel Handlers ---
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_CHAT_IDS: 
         logger.warning(f"Unauthorized admin access attempt by {update.effective_user.id}.")
@@ -1242,10 +1239,12 @@ async def set_announcement_text(update: Update, context: ContextTypes.DEFAULT_TY
             session.rollback()
             logger.error(f"Database error in set_announcement_text: {db_err}", exc_info=True)
             await update.message.reply_text("Database operation failed while setting announcement.")
+            return ConversationHandler.END # End conversation on DB error
         except Exception as e:
             session.rollback()
             logger.error(f"Error setting/clearing announcement: {e}")
             await update.message.reply_text("An error occurred while setting/clearing the announcement.")
+            return ConversationHandler.END # End conversation on other error
 
         return ConversationHandler.END
 
@@ -1312,7 +1311,7 @@ async def get_task_reward(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def remove_task_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with Session() as session:
-        query = update.callback_query; await query.answer(); 
+        query = update.callback_query; await query.answer()
         if query.from_user.id not in ADMIN_CHAT_IDS: return
         
         tasks = session.query(Task).all()
@@ -1353,7 +1352,7 @@ async def delete_task_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             await remove_task_list(update, context) 
 
 async def manage_codes(update: Update, context: ContextTypes.DEFAULT_TYPE): 
-    query = update.callback_query; await query.answer(); 
+    query = update.callback_query; await query.answer()
     if query.from_user.id not in ADMIN_CHAT_IDS: return
     
     keyboard = [[InlineKeyboardButton("➕ Add New Code", callback_data="add_code_start")], 
@@ -1391,7 +1390,7 @@ async def get_new_code_reward(update: Update, context: ContextTypes.DEFAULT_TYPE
     except ValueError: 
         await update.message.reply_text("Invalid amount. Please enter a number (e.g., 100.00):"); 
         return NEW_CODE_REWARD
-    except Exception as e: # Catch any unexpected errors
+    except Exception as e: 
         logger.error(f"Error in get_new_code_reward: {e}")
         await update.message.reply_text("An unexpected error occurred. Please try again.")
         return ConversationHandler.END
@@ -1427,7 +1426,7 @@ async def get_new_code_uses(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def remove_code_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with Session() as session:
-        query = update.callback_query; await query.answer(); 
+        query = update.callback_query; await query.answer()
         if query.from_user.id not in ADMIN_CHAT_IDS: return
         
         codes = session.query(RedeemCode).all()
@@ -1525,10 +1524,12 @@ async def user_mgt_id_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             session.rollback()
             logger.error(f"Database error during user management action {context.user_data['mgt_action']} for user {user_id}: {db_err}", exc_info=True)
             await update.message.reply_text("Database operation failed.")
+            return ConversationHandler.END # End conversation on DB error
         except Exception as e:
             session.rollback()
             logger.error(f"Error during user management action {context.user_data['mgt_action']} for user {user_id}: {e}")
             await update.message.reply_text("An error occurred. Please try again.")
+            return ConversationHandler.END # End conversation on other error
 
         return ConversationHandler.END
 
@@ -1560,10 +1561,12 @@ async def user_mgt_duration_input(update: Update, context: ContextTypes.DEFAULT_
             session.rollback()
             logger.error(f"Database error restricting user {user_id}: {db_err}", exc_info=True)
             await update.message.reply_text("Database operation failed while restricting user.")
+            return ConversationHandler.END # End conversation on DB error
         except Exception as e:
             session.rollback()
             logger.error(f"Error restricting user {user_id}: {e}")
             await update.message.reply_text("An error occurred. Please try again.")
+            return ConversationHandler.END # End conversation on other error
 
         return ConversationHandler.END
 
