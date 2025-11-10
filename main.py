@@ -18,7 +18,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 BOT_TOKEN = "8085121840:AAHGpim6s0j8FU8yZ5jSiyu6Ol51Rdgod8E"  # Get this from @BotFather
 BOT_USERNAME = "XeweeBot"             # Your bot's @username (without the @)
 ADMIN_CHAT_IDS: Tuple[int, ...] = (7588209802, 6780778947) # Your Super Admin Telegram User IDs (can be multiple)
-MINI_APP_URL = "https://82628273728-app-frontend-seven.vercel.app" # Your Vercel frontend URL - *** REMEMBER TO UPDATE THIS! ***
+MINI_APP_URL = "https://your-xewee-frontend.vercel.app" # Your Vercel frontend URL - *** IMPORTANT: REPLACE WITH YOUR ACTUAL FRONTEND URL! ***
 # ------------------------------------
 
 # --- Xewee Feature Constants ---
@@ -65,7 +65,7 @@ class User(Base):
     last_login_date = Column(Date, nullable=True) # For daily bonus claim
     daily_claim_invites = Column(Integer, default=0) # Invites since last daily claim
     claimed_milestones = Column(Text, default="{}") # JSON string for task milestones claimed
-    # Relationships for convenience
+    
     created_game_rooms = relationship("GameRoom", foreign_keys="[GameRoom.creator_id]", back_populates="creator")
     joined_game_rooms = relationship("GameRoom", foreign_keys="[GameRoom.opponent_id]", back_populates="opponent")
     # No back_populates for winner to avoid circular references if not strictly needed in User model
@@ -144,7 +144,7 @@ class GameRoom(Base):
 
     creator = relationship("User", foreign_keys=[creator_id], back_populates="created_game_rooms")
     opponent = relationship("User", foreign_keys=[opponent_id], back_populates="joined_game_rooms")
-    winner = relationship("User", foreign_keys=[winner_id]) # No back_populates to avoid recursive relationship for winner
+    winner = relationship("User", foreign_keys=[winner_id]) # No back_populates for winner to avoid recursive relationship for winner
 
 # Database connection for Railway (PostgreSQL) or local (SQLite)
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///xewee_data.db")
@@ -434,7 +434,7 @@ async def submit_task_proof(request: Request):
         caption = f"**New Task Submission for Review**\n\n- User: {user_info_for_admin}\n- Task: {task_description}\n- Reward: ₱{task_reward:.2f}\n- Note: {text}"
         keyboard = [[InlineKeyboardButton("Approve ✅", callback_data=f"approve_sub_{submission.id}"), InlineKeyboardButton("Reject ❌", callback_data=f"reject_sub_start_{submission.id}")]]
         
-        photo_data = base64.b64decode(photo_base64.split(',',1)[1]) # Use split(',',1)
+        photo_data = base64.b64decode(photo_base64.split(',',1)[1])
         for admin_id in ADMIN_CHAT_IDS:
             try:
                 await ptb_app.bot.send_photo(chat_id=admin_id, photo=BytesIO(photo_data), caption=caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -818,7 +818,6 @@ async def make_game_move(request: Request):
                 winner.balance += winnings
                 db_session.commit()
 
-                # Notify players and record events
                 await ptb_app.bot.send_message(room.creator_id, f"🏆 {final_result_message} You won ₱{winnings:.2f}!")
                 await ptb_app.bot.send_message(room.opponent_id, f"😔 {final_result_message} You lost ₱{room.bet_amount:.2f}.")
                 logger.info(f"Game {room_id} finished. Winner: {winner.id}. Payout: {winnings}.")
@@ -921,7 +920,7 @@ async def get_game_state(request: Request):
             "opponent_move_made": bool(room.opponent_move if is_creator else room.creator_move),
             "your_last_move": room.creator_move if is_creator else room.opponent_move,
             "opponent_last_move": room.opponent_move if is_creator else room.creator_move,
-            "opponent_name": room.opponent.first_name if room.opponent else "Opponent" # Ensure opponent name is passed
+            "opponent_name": room.opponent.first_name if room.opponent else "Opponent"
         }
     except HTTPException as he:
         db_session.rollback()
@@ -944,14 +943,12 @@ async def leave_game_room(request: Request):
         if room.status == 'finished' or room.status == 'cancelled':
             raise HTTPException(status_code=400, detail="Game is already finished or cancelled.")
 
-        # Determine who is leaving and who to notify
         leaving_player_id = user_id
         opponent_player_id = room.opponent_id if room.creator_id == user_id else room.creator_id
         
         leaving_player_db = db_session.query(User).filter(User.id == leaving_player_id).first()
         opponent_player_db = db_session.query(User).filter(User.id == opponent_player_id).first()
 
-        # Refund the leaving player (their bet)
         if leaving_player_db:
             leaving_player_db.balance += room.bet_amount
             await ptb_app.bot.send_message(leaving_player_id, f"You left the game '{room.room_name or room.id}'. Your bet of ₱{room.bet_amount:.2f} has been refunded.")
@@ -960,10 +957,9 @@ async def leave_game_room(request: Request):
         room.updated_at = datetime.utcnow()
         db_session.commit()
 
-        # Notify opponent and refund their bet if they were in the game
         if opponent_player_id and opponent_player_db:
             opponent_player_db.balance += room.bet_amount
-            db_session.commit() # Commit opponent's refund
+            db_session.commit()
             await ptb_app.bot.send_message(opponent_player_id, f"🚫 Your opponent left the game '{room.room_name or room.id}'. The game has been cancelled and your bet of ₱{room.bet_amount:.2f} has been refunded.")
         
         logger.info(f"User {user_id} left game room {room_id}. Game cancelled.")
@@ -1286,7 +1282,7 @@ async def get_new_code_reward(update: Update, context: ContextTypes.DEFAULT_TYPE
             return NEW_CODE_REWARD
         context.user_data['new_code_reward'] = reward
         await update.message.reply_text("Enter uses left (-1 for unlimited, 1 for single-use):\n\nTo cancel, send /cancel."); 
-        return NEW_CODE_USES
+    return NEW_CODE_USES
     except ValueError: 
         await update.message.reply_text("Invalid amount. Please enter a number (e.g., 100.00):"); 
         return NEW_CODE_REWARD
@@ -2056,7 +2052,7 @@ async def get_warn_user_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = int(update.message.text)
         if user_id in ADMIN_CHAT_IDS:
             await update.message.reply_text("You cannot warn an admin. Please enter a different User ID.");
-            return WARN_USER_ID
+            return USER_MGT_ID
         context.user_data['warn_user_id'] = user_id
     except ValueError: 
         await update.message.reply_text("Invalid User ID. Please enter a numerical ID:"); 
