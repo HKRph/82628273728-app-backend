@@ -115,8 +115,7 @@ engine = create_engine(DATABASE_URL); Base.metadata.create_all(engine); Session 
 TASK_DESC, TASK_LINK, TASK_REWARD, REJECT_REASON_WD, BROADCAST_MESSAGE, ANNOUNCEMENT_TEXT, \
 NEW_CODE_CODE, NEW_CODE_REWARD, NEW_CODE_USES, USER_MGT_ID, USER_MGT_ACTION, USER_MGT_DURATION, \
 RAIN_AMOUNT, RAIN_USERS, SUBMIT_TASK_REJECT_REASON, DELETE_TASK, DELETE_CODE, WARN_USER_ID, \
-WARN_REASON, USER_SEARCH_INPUT, ADJUST_BALANCE_ID, ADJUST_BALANCE_AMOUNT, ADJUST_BALANCE_CONFIRM = range(24)
-
+WARN_REASON, USER_SEARCH_INPUT, ADJUST_BALANCE_ID, ADJUST_BALANCE_AMOUNT, ADJUST_BALANCE_CONFIRM = range(24) # Corrected range to 24
 
 # --- Bot & API Lifespan ---
 ptb_app = Application.builder().token(BOT_TOKEN).build()
@@ -318,12 +317,14 @@ async def submit_task_proof(request: Request):
             task_reward = task.reward
         
         # Get user's first name and username for admin notification
-        user_info_for_admin = f"{user_db.first_name} (`{user_db.id}`)"
-        # Note: Telegram user objects from initDataUnsafe might not always have 'username'
-        # To get username reliably, a bot interaction often works best.
-        # For this, we'll try to get it from the User DB if it was saved from a /start command.
-        # Or, we could pass it from frontend if available in initDataUnsafe.
-        # For now, let's keep it simple with first_name and ID.
+        user_tg_obj = None
+        try:
+            user_tg_obj = await ptb_app.bot.get_chat(user_id) # Fetch actual Telegram user object
+        except Exception as e:
+            logger.warning(f"Could not fetch live Telegram user object for {user_id}: {e}")
+
+        username_str = f" (@{user_tg_obj.username})" if user_tg_obj and user_tg_obj.username else ""
+        user_info_for_admin = f"{user_db.first_name or (user_tg_obj.first_name if user_tg_obj else 'Unknown')} (`{user_db.id}`){username_str}"
 
         caption = f"**New Task Submission for Review**\n\n- User: {user_info_for_admin}\n- Task: {task_description}\n- Reward: ₱{task_reward:.2f}\n- Note: {text}"
         keyboard = [[InlineKeyboardButton("Approve ✅", callback_data=f"approve_sub_{submission.id}"), InlineKeyboardButton("Reject ❌", callback_data=f"reject_sub_start_{submission.id}")]]
@@ -362,11 +363,12 @@ async def redeem_code(request: Request):
 
         # Basic check: if code is single-use and uses_left is 1, then prevent multiple uses by same user.
         # For more robust unique user usage, a separate table to track user-code redemptions is needed.
+        # For simplicity, we'll assume a single-use code is for ANY single use, not per user.
         if code.uses_left == 1:
-            # We need a way to track if this specific user has used this specific code before.
-            # This current setup only tracks overall uses_left.
-            # For simplicity, we'll assume a single-use code is for ANY single use, not per user.
-            pass # Keep current behavior
+            # Check if this user has already redeemed this specific single-use code
+            # This requires a more complex check; for now, we rely on uses_left.
+            # If you want per-user single-use codes, you'd need a UserRedemptionCodes table.
+            pass
 
         user_db.balance += code.reward
         if code.uses_left != -1: 
@@ -441,9 +443,14 @@ async def submit_withdrawal(request: Request):
         await ptb_app.bot.send_message(user_id, f"✅ Your withdrawal request for ₱{amount:.2f} (Fee: ₱{fee:.2f}) has been submitted! Our team will review it shortly.")
         
         # Get user's first name and username for admin notification
-        user_tg_obj = await ptb_app.bot.get_chat(user_id) # Fetch actual Telegram user object
-        username_str = f" (@{user_tg_obj.username})" if user_tg_obj.username else ""
-        user_info_for_admin = f"{user_db.first_name or user_tg_obj.first_name} (`{user_db.id}`){username_str}"
+        user_tg_obj = None
+        try:
+            user_tg_obj = await ptb_app.bot.get_chat(user_id) # Fetch actual Telegram user object
+        except Exception as e:
+            logger.warning(f"Could not fetch live Telegram user object for {user_id}: {e}")
+
+        username_str = f" (@{user_tg_obj.username})" if user_tg_obj and user_tg_obj.username else ""
+        user_info_for_admin = f"{user_db.first_name or (user_tg_obj.first_name if user_tg_obj else 'Unknown')} (`{user_db.id}`){username_str}"
 
         admin_message = f"**New Withdrawal Request**\n\n- User: {user_info_for_admin}\n- Amount: `₱{amount:.2f}`\n- Fee: `₱{fee:.2f}`\n- Method: `{method}`\n- Details: `{details}`\n\n**Action: /admin**"
         keyboard = [[InlineKeyboardButton("Approve ✅", callback_data=f"approve_wd_{new_withdrawal.id}"), InlineKeyboardButton("Reject ❌", callback_data=f"reject_wd_start_{new_withdrawal.id}")]]
@@ -774,7 +781,8 @@ async def delete_task_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     task = db_session.query(Task).filter(Task.id == task_id).first()
     if task: 
         try:
-            db_session.delete(task); db_session.commit(); 
+            db_session.delete(task); 
+            db_session.commit(); 
             await query.answer("Task removed!", show_alert=True); 
             logger.info(f"Admin {query.from_user.id} deleted task {task_id}.")
             await remove_task_list(update, context) # Refresh list
@@ -988,34 +996,36 @@ async def user_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     search_query = update.message.text.strip()
     
     user_db = None
+    user_tg_obj = None
+
     try:
         # Try to search by ID first
         user_id = int(search_query)
         user_db = db_session.query(User).filter(User.id == user_id).first()
+        if user_db:
+            try:
+                user_tg_obj = await ptb_app.bot.get_chat(user_db.id)
+            except Exception as e:
+                logger.warning(f"Could not fetch live Telegram user object for ID {user_db.id}: {e}")
     except ValueError:
-        # If not an ID, try searching by username (requires fetching user from Telegram API)
-        if search_query.startswith('@'):
-            username = search_query[1:]
-        else:
-            username = search_query # Assume it's a username without '@'
+        # If not an ID, try searching by username
+        username_query = search_query
+        if username_query.startswith('@'):
+            username_query = username_query[1:]
         
-        # This is a bit tricky as User table doesn't store Telegram username.
-        # We need to query Telegram API directly to get user ID from username,
-        # then search our DB. But getting chat by username is rate-limited/requires permissions.
-        # For simplicity, if not found by ID, we'll mark as "not found."
-        # A more robust solution would involve storing username in DB.
-        
-        # For now, let's just log if it's a username search and fail.
-        logger.warning(f"User search for '{search_query}' (non-ID) failed. Usernames are not directly searchable in DB.")
-    
-    if user_db:
-        user_tg_obj = None
-        try:
-            # Try to get live Telegram user object for up-to-date username/first_name
-            user_tg_obj = await ptb_app.bot.get_chat(user_db.id)
-        except Exception as e:
-            logger.warning(f"Could not fetch live Telegram user object for {user_db.id}: {e}")
+        # NOTE: Searching by username from the bot's perspective is tricky.
+        # `bot.get_chat(username)` works but `User` table doesn't store username.
+        # For a full implementation, you'd need to either:
+        # 1. Store username in your `User` table (and update it periodically)
+        # 2. Iterate through all users in your DB and try to fetch their Telegram chat to match username (very slow/rate-limited)
+        # For simplicity, if not found by ID, we'll log it as such and say not found.
+        # To make it work, when a user starts the bot, you can store their username if it exists.
+        # For this version, let's just indicate if it's a username search and it won't directly find in DB without ID.
+        await update.message.reply_text(f"Searching by username is not directly supported in the database. Please provide User ID.\n\nTo cancel, send /cancel.");
+        return USER_SEARCH_INPUT
 
+
+    if user_db:
         username_display = f"@{user_tg_obj.username}" if user_tg_obj and user_tg_obj.username else "N/A"
         first_name_display = user_db.first_name or (user_tg_obj.first_name if user_tg_obj else "Unknown")
         referrer_info = f"Referred by: `{user_db.referrer_id}`" if user_db.referrer_id else "No referrer"
@@ -1034,8 +1044,10 @@ async def user_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"- {referrer_info}\n"
         )
         await update.message.reply_text(user_info_msg, parse_mode='Markdown')
+        logger.info(f"Admin {update.effective_user.id} searched for user {search_query}, found {user_db.id}.")
     else:
-        await update.message.reply_text(f"User '{search_query}' not found.")
+        await update.message.reply_text(f"User '{search_query}' not found by ID.")
+        logger.info(f"Admin {update.effective_user.id} searched for user {search_query}, not found.")
     
     return ConversationHandler.END
 
@@ -1088,8 +1100,8 @@ async def confirm_adjust_balance(update: Update, context: ContextTypes.DEFAULT_T
     if update.effective_user.id not in ADMIN_CHAT_IDS: return
     
     if update.message.text.lower() == 'yes':
-        user_id = context.user_data['adjust_user_id']
-        amount = context.user_data['adjust_amount']
+        user_id = context.user_data.get('adjust_user_id')
+        amount = context.user_data.get('adjust_amount')
         user_db = db_session.query(User).filter(User.id == user_id).first()
         
         if user_db:
@@ -1182,6 +1194,9 @@ async def review_submissions(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await message_to_edit.edit_text("No pending submissions to review.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]))
         else:
             await context.bot.send_message(update.effective_chat.id, "No pending submissions to review.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]))
+        # Clean up stored message ID
+        if 'admin_submission_message' in context.user_data:
+            del context.user_data['admin_submission_message']
         return
     
     user_db = db_session.query(User).filter(User.id == submission.user_id).first() 
@@ -1207,31 +1222,46 @@ async def review_submissions(update: Update, context: ContextTypes.DEFAULT_TYPE)
     username_display = f"@{user_tg_obj.username}" if user_tg_obj and user_tg_obj.username else "N/A"
     first_name_display = user_db.first_name or (user_tg_obj.first_name if user_tg_obj else "Unknown")
     
-    caption = f"**Submission Review (ID: {submission.id})**\n\n- User: {first_name_display} (`{user_db.id}`){f' {username_display}' if username_display != 'N/A' else ''}\n- Task: {task.description}\n- Reward: ₱{task.reward:.2f}\n- Note: {submission.text_proof}\n\nSubmitted on: {submission.created_at.strftime('%Y-%m-%d')}"
+    caption_text = f"**Submission Review (ID: {submission.id})**\n\n- User: {first_name_display} (`{user_db.id}`){f' {username_display}' if username_display != 'N/A' else ''}\n- Task: {task.description}\n- Reward: ₱{task.reward:.2f}\n- Note: {submission.text_proof}\n\nSubmitted on: {submission.created_at.strftime('%Y-%m-%d')}"
     keyboard = [[InlineKeyboardButton("Approve ✅", callback_data=f"approve_sub_{submission.id}"), InlineKeyboardButton("Reject ❌", callback_data=f"reject_sub_start_{submission.id}")]]
     
     # Store the original message object to edit it later
-    if update.callback_query:
-        context.user_data['admin_submission_message'] = message_to_edit
+    context.user_data['admin_submission_message'] = message_to_edit
     
     try:
         photo_data = base64.b64decode(submission.photo_proof_base64.split(',')[1])
-        # To avoid "Message is not modified" errors, check if content is truly different.
-        # This is complex for photos as caption could change. Simplest is to just edit.
-        await message_to_edit.edit_media(
-            media=InputFile(BytesIO(photo_data), filename=f"submission_{submission.id}.png"), # Added filename
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            caption=caption,
-            parse_mode='Markdown'
-        )
+        
+        # Determine if we need to edit a photo message or send a new one
+        if message_to_edit and message_to_edit.photo: # If the current message already has a photo
+            if message_to_edit.caption != caption_text: # Only edit if caption changed
+                await message_to_edit.edit_media(
+                    media=InputFile(BytesIO(photo_data), filename=f"submission_{submission.id}.png"), 
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    caption=caption_text,
+                    parse_mode='Markdown'
+                )
+            else:
+                logger.info(f"Submission {submission.id} photo message caption not modified, skipping edit media.")
+        elif message_to_edit and message_to_edit.text: # If current message is text, and we now have a photo
+            await message_to_edit.delete() # Delete old text message
+            message_to_edit = await context.bot.send_photo(chat_id=update.effective_chat.id, photo=BytesIO(photo_data), caption=caption_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            context.user_data['admin_submission_message'] = message_to_edit # Update stored message
+        else: # Initial message or no previous message to edit
+            message_to_edit = await context.bot.send_photo(chat_id=update.effective_chat.id, photo=BytesIO(photo_data), caption=caption_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            context.user_data['admin_submission_message'] = message_to_edit # Store new message
+        
     except Exception as e:
         logger.error(f"Failed to display photo for submission {submission.id}: {e}. Sending as text instead.")
         # If photo fails, send as text and log error
-        new_text_content = caption + "\n\n*(Failed to display image proof)*"
-        if message_to_edit.text == new_text_content and message_to_edit.reply_markup == InlineKeyboardMarkup(keyboard):
-            logger.info("Message content not modified, skipping edit.")
-        else:
-            await message_to_edit.edit_text(new_text_content, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        new_text_content = caption_text + "\n\n*(Failed to display image proof)*"
+        if message_to_edit:
+            if message_to_edit.text != new_text_content or message_to_edit.reply_markup != InlineKeyboardMarkup(keyboard):
+                await message_to_edit.edit_text(new_text_content, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            else:
+                logger.info(f"Submission {submission.id} text message content not modified, skipping edit.")
+        else: # Send new text message if no previous message to edit
+            message_to_edit = await context.bot.send_message(update.effective_chat.id, new_text_content, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            context.user_data['admin_submission_message'] = message_to_edit
 
 
 async def approve_submission(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1243,7 +1273,13 @@ async def approve_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     # Check if submission is still pending
     if not submission or submission.status != 'pending': 
-        await query.edit_message_caption(caption=f"{query.message.caption}\n\n**Status: Already processed.**", parse_mode='Markdown')
+        # Get the current message content
+        current_caption = query.message.caption if query.message.caption else ""
+        new_caption = f"{current_caption}\n\n**Status: Already processed.**"
+        if current_caption != new_caption:
+            await query.edit_message_caption(caption=new_caption, parse_mode='Markdown')
+        else:
+            logger.info(f"Admin message for submission {sub_id} already shows processed. Skipping edit.")
         return
     
     user_db = db_session.query(User).filter(User.id == submission.user_id).first() 
@@ -1254,7 +1290,12 @@ async def approve_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
         submission.status = 'rejected' 
         submission.rejection_reason = "User account not active."
         db_session.commit()
-        await query.edit_message_caption(caption=f"{query.message.caption}\n\n**Status: REJECTED (User not active or found)**", parse_mode='Markdown')
+        current_caption = query.message.caption if query.message.caption else ""
+        new_caption = f"{current_caption}\n\n**Status: REJECTED (User not active or found)**"
+        if current_caption != new_caption:
+            await query.edit_message_caption(caption=new_caption, parse_mode='Markdown')
+        else:
+            logger.info(f"Admin message for submission {sub_id} already shows rejected. Skipping edit.")
         logger.warning(f"Submission {sub_id} rejected: User {submission.user_id} not active or found.")
         await review_submissions(update, context) # Show next pending submission
         return
@@ -1262,7 +1303,12 @@ async def approve_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
         submission.status = 'rejected' 
         submission.rejection_reason = "Associated task not found."
         db_session.commit()
-        await query.edit_message_caption(caption=f"{query.message.caption}\n\n**Status: REJECTED (Task not found)**", parse_mode='Markdown')
+        current_caption = query.message.caption if query.message.caption else ""
+        new_caption = f"{current_caption}\n\n**Status: REJECTED (Task not found)**"
+        if current_caption != new_caption:
+            await query.edit_message_caption(caption=new_caption, parse_mode='Markdown')
+        else:
+            logger.info(f"Admin message for submission {sub_id} already shows rejected. Skipping edit.")
         logger.warning(f"Submission {sub_id} rejected: Task {submission.task_id} not found.")
         await review_submissions(update, context) # Show next pending submission
         return
@@ -1317,9 +1363,10 @@ async def approve_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await ptb_app.bot.send_message(chat_id=user_db.id, text=f"✅ Your submission for '{task.description}' was approved. (Reward already processed for this task).")
             logger.info(f"Submission {sub_id} approved for user {user_db.id}, task {task.id}. Task already completed, no new reward.")
 
-        new_caption = f"{query.message.caption}\n\n**Status: APPROVED**"
+        current_caption = query.message.caption if query.message.caption else ""
+        new_caption = f"{current_caption}\n\n**Status: APPROVED**"
         # Check if message is already modified to avoid BadRequest
-        if query.message.caption != new_caption:
+        if current_caption != new_caption:
             await query.edit_message_caption(caption=new_caption, parse_mode='Markdown')
         else:
             logger.info(f"Admin message for submission {sub_id} already shows APPROVED. Skipping edit.")
@@ -1341,12 +1388,17 @@ async def reject_submission_start(update: Update, context: ContextTypes.DEFAULT_
     submission = db_session.query(TaskSubmission).filter(TaskSubmission.id == sub_id).first()
     
     if not submission or submission.status != 'pending': 
-        await query.edit_message_caption(caption=f"{query.message.caption}\n\n**Status: Already processed.**", parse_mode='Markdown')
+        current_caption = query.message.caption if query.message.caption else ""
+        new_caption = f"{current_caption}\n\n**Status: Already processed.**"
+        if current_caption != new_caption:
+            await query.edit_message_caption(caption=new_caption, parse_mode='Markdown')
+        else:
+            logger.info(f"Admin message for submission {sub_id} already shows processed. Skipping edit.")
         return
 
     context.user_data['submission_id_to_reject'] = sub_id
     # Store the original message caption for later editing
-    context.user_data['original_submission_caption'] = query.message.caption
+    context.user_data['original_submission_caption'] = query.message.caption if query.message.caption else ""
     await query.message.reply_text("Please provide a brief reason for rejecting this submission (or send /skip for no reason).\n\nTo cancel, send /cancel."); 
     return SUBMIT_TASK_REJECT_REASON
 
@@ -1377,6 +1429,7 @@ async def get_submission_rejection_reason(update: Update, context: ContextTypes.
         admin_message_to_edit = context.user_data.get('admin_submission_message')
         if admin_message_to_edit:
             new_caption = f"{original_caption}\n\n**Status: REJECTED**\nReason: {reason}"
+            # Check if message is already modified to avoid BadRequest
             if admin_message_to_edit.caption != new_caption:
                 await admin_message_to_edit.edit_caption(caption=new_caption, parse_mode='Markdown')
             else:
@@ -1399,8 +1452,8 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
     withdrawal = db_session.query(Withdrawal).filter(Withdrawal.id == wd_id).first()
     
     if not withdrawal or withdrawal.status != "pending": 
-        # Safely access message text or caption
-        message_content = query.message.text if query.message.text else query.message.caption
+        # Safely get current message content (text or caption)
+        message_content = query.message.text if query.message.text else query.message.caption if query.message.caption else ""
         new_content = f"{message_content}\n\n**Status: Already processed.**"
         if message_content != new_content:
             await query.message.edit_text(new_content, parse_mode='Markdown')
@@ -1412,15 +1465,15 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
         withdrawal.status = "approved"; 
         db_session.commit(); 
         
-        # Safely access message text or caption
-        message_content = query.message.text if query.message.text else query.message.caption
+        # Safely get current message content (text or caption)
+        message_content = query.message.text if query.message.text else query.message.caption if query.message.caption else ""
         new_content = f"{message_content}\n\n✅ **Request #{wd_id} approved.**"
         if message_content != new_content:
             await query.message.edit_text(new_content, parse_mode='Markdown')
         else:
             logger.info(f"Admin message for withdrawal {wd_id} already shows approved. Skipping edit.")
         
-        await ptb_app.bot.send_message(chat_id=withdrawal.user_id, text=f"🎉 Good news! Your withdrawal of ₱{withdrawal.amount:.2f} has been approved and sent.")
+        await ptb_app.bot.send_message(chat_id=withdrawal.user_id, text=f"🎉 Good news! Your withdrawal of ₱{withdrawal.amount:.2f} has been approved and sent via {withdrawal.method}.")
         logger.info(f"Admin {query.from_user.id} approved withdrawal {wd_id} for user {withdrawal.user_id}.")
     except Exception as e:
         db_session.rollback()
@@ -1436,8 +1489,7 @@ async def reject_withdrawal_start(update: Update, context: ContextTypes.DEFAULT_
     withdrawal = db_session.query(Withdrawal).filter(Withdrawal.id == wd_id).first()
     
     if not withdrawal or withdrawal.status != 'pending': 
-        # Safely access message text or caption
-        message_content = query.message.text if query.message.text else query.message.caption
+        message_content = query.message.text if query.message.text else query.message.caption if query.message.caption else ""
         new_content = f"{message_content}\n\n**Status: Already processed.**"
         if message_content != new_content:
             await query.message.edit_text(new_content, parse_mode='Markdown')
@@ -1447,7 +1499,9 @@ async def reject_withdrawal_start(update: Update, context: ContextTypes.DEFAULT_
 
     context.user_data['withdrawal_id_to_reject'] = wd_id
     # Store the original message text/caption for later editing
-    context.user_data['original_withdrawal_message_content'] = query.message.text if query.message.text else query.message.caption
+    context.user_data['original_withdrawal_message_content'] = query.message.text if query.message.text else query.message.caption if query.message.caption else ""
+    # Store the message object itself to edit it later (since context.user_data is per-user for conversations)
+    context.user_data['admin_withdrawal_message_object'] = query.message
     await query.message.reply_text("Please provide a brief reason for rejecting this withdrawal (or send /skip).\n\nTo cancel, send /cancel."); 
     return REJECT_REASON_WD
 
@@ -1479,17 +1533,11 @@ async def get_withdrawal_rejection_reason(update: Update, context: ContextTypes.
         logger.info(f"Admin {update.effective_user.id} rejected withdrawal {wd_id} for user {withdrawal.user_id}.")
 
         # Edit the original admin message to show rejected status
-        admin_message_to_edit_id = context.user_data.get('admin_withdrawal_message_id') # If we stored the message ID
-        # For simplicity, since the rejection reason is passed directly in the conversation,
-        # we'll just send a new message to the admin, or rely on them seeing their own chat.
-        # Editing the original message is harder outside a callback_query context.
-        # Alternatively, we could've stored query.message in user_data.
-        # Let's directly edit the message that initiated the rejection
-        if context.user_data.get('admin_withdrawal_message_object'):
-            message_obj = context.user_data['admin_withdrawal_message_object']
+        admin_message_to_edit = context.user_data.get('admin_withdrawal_message_object')
+        if admin_message_to_edit:
             new_content = f"{original_content}\n\n❌ **Request #{wd_id} rejected.**\nReason: {reason}"
-            if message_obj.text != new_content:
-                await message_obj.edit_text(new_content, parse_mode='Markdown')
+            if admin_message_to_edit.text != new_content:
+                await admin_message_to_edit.edit_text(new_content, parse_mode='Markdown')
             else:
                 logger.info(f"Admin message for withdrawal {wd_id} already shows rejected. Skipping edit.")
     except Exception as e:
@@ -1595,7 +1643,8 @@ async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE
     if update.effective_user.id not in ADMIN_CHAT_IDS: return
     await update.message.reply_text("Operation cancelled.")
     # Clear user_data for this conversation
-    context.user_data.clear()
+    if context.user_data: # Ensure user_data exists
+        context.user_data.clear()
     return ConversationHandler.END
 
 # --- Add Handlers to the PTB Application ---
