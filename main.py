@@ -18,7 +18,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 BOT_TOKEN = "8085121840:AAHGpim6s0j8FU8yZ5jSiyu6Ol51Rdgod8E"  # Get this from @BotFather
 BOT_USERNAME = "XeweeBot"             # Your bot's @username (without the @)
 ADMIN_CHAT_IDS: Tuple[int, ...] = (7588209802, 6780778947) # Your Super Admin Telegram User IDs (can be multiple)
-MINI_APP_URL = "https://82628273728-app-frontend-seven.vercel.app" # Your Vercel frontend URL - *** REMEMBER TO UPDATE THIS! ***
+MINI_APP_URL = "https://your-xewee-frontend.vercel.app" # Your Vercel frontend URL - *** REMEMBER TO UPDATE THIS! ***
 # ------------------------------------
 
 # --- Xewee Feature Constants ---
@@ -111,11 +111,11 @@ if DATABASE_URL.startswith("postgres://"):
 engine = create_engine(DATABASE_URL); Base.metadata.create_all(engine); Session = sessionmaker(bind=engine); db_session = Session()
 
 # --- Conversation States (Explicitly Defined) ---
-# These are used by python-telegram-bot's ConversationHandler
+# THESE MUST BE EXACTLY 23 ITEMS TO MATCH range(23)
 TASK_DESC, TASK_LINK, TASK_REWARD, REJECT_REASON_WD, BROADCAST_MESSAGE, ANNOUNCEMENT_TEXT, \
 NEW_CODE_CODE, NEW_CODE_REWARD, NEW_CODE_USES, USER_MGT_ID, USER_MGT_ACTION, USER_MGT_DURATION, \
 RAIN_AMOUNT, RAIN_USERS, SUBMIT_TASK_REJECT_REASON, DELETE_TASK, DELETE_CODE, WARN_USER_ID, \
-WARN_REASON, USER_SEARCH_INPUT, ADJUST_BALANCE_ID, ADJUST_BALANCE_AMOUNT, ADJUST_BALANCE_CONFIRM = range(24) # Corrected range to 24
+WARN_REASON, USER_SEARCH_INPUT, ADJUST_BALANCE_ID, ADJUST_BALANCE_AMOUNT, ADJUST_BALANCE_CONFIRM = range(23) # CORRECTED: Changed from range(24) to range(23)
 
 # --- Bot & API Lifespan ---
 ptb_app = Application.builder().token(BOT_TOKEN).build()
@@ -1473,7 +1473,7 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
         else:
             logger.info(f"Admin message for withdrawal {wd_id} already shows approved. Skipping edit.")
         
-        await ptb_app.bot.send_message(chat_id=withdrawal.user_id, text=f"🎉 Good news! Your withdrawal of ₱{withdrawal.amount:.2f} has been approved and sent via {withdrawal.method}.")
+        await ptb_app.bot.send_message(chat_id=withdrawal.user_id, text=f"🎉 Good news! Your withdrawal of ₱{withdrawal.amount:.2f} has been approved and sent.")
         logger.info(f"Admin {query.from_user.id} approved withdrawal {wd_id} for user {withdrawal.user_id}.")
     except Exception as e:
         db_session.rollback()
