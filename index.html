@@ -1,0 +1,1430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Xewee Mini-App</title>
+    
+    <!-- Telegram WebApp Script (ESSENTIAL) -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
+    <!-- Google Fonts for pixel-art style -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+    
+    <!-- Embedded CSS Styling -->
+    <style>
+        /* Telegram Theme Colors (dynamic) and Custom Xewee Colors */
+        :root {
+            --tg-bg: var(--tg-theme-bg-color, #212121);
+            --tg-text: var(--tg-theme-text-color, #eeeeee);
+            --tg-hint: var(--tg-theme-hint-color, #9e9e9e);
+            --tg-button: var(--tg-theme-button-color, #42a5f5);
+            --tg-button-text: var(--tg-theme-button-text-color, #ffffff);
+            --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #303030);
+            
+            --pixel-border-light: #424242; /* Lighter pixel border shade */
+            --pixel-border-dark: #000000; /* Darker pixel border shade */
+            --accent-green: #00e676; /* Success/Approved */
+            --accent-red: #ff5252; /* Danger/Rejected */
+            --accent-yellow: #ffea00; /* Balance/Pending */
+            --pixel-input-bg: #ffffff; /* White background for the special input */
+            --pixel-input-text: #000000; /* Dark text for the special input */
+            --notification-success-bg: #004d40; /* Dark green for approved notifications */
+            --notification-danger-bg: #b71c1c; /* Dark red for rejected notifications */
+            --notification-text-color: #ffffff; /* White text for notifications */
+            --notification-badge-bg: #ff0000; /* Red badge for unread notifications */
+            --notification-badge-text: #ffffff;
+        }
+        
+        /* Keyframe Animations */
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes toastIn { from { opacity: 0; bottom: 60px; } to { opacity: 1; bottom: 80px; } }
+        @keyframes toastOut { to { opacity: 0; bottom: 60px; } }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Base Body Styles */
+        body { 
+            font-family: 'VT323', monospace; 
+            padding: 10px 10px 80px 10px; /* Padding for content and bottom nav */
+            margin: 0; 
+            color: var(--tg-text); 
+            background-color: var(--tg-bg); 
+            -webkit-font-smoothing: none; /* Crucial for pixelated text effect */
+            image-rendering: pixelated; /* Ensures all images/graphics stay pixelated */
+            animation: fadeIn 0.5s; 
+            overflow-x: hidden; /* Prevent horizontal scroll */
+            box-sizing: border-box; /* Include padding in element's total width/height */
+        }
+        
+        /* View Management */
+        .app-view { display: none; } /* Hide all views by default */
+        .app-view.active { display: block; animation: fadeIn 0.3s; } /* Show active view with fade */
+        
+        /* Pixel-Art Container Styling */
+        .pixel-container { 
+            border: 3px solid var(--pixel-border-dark); 
+            border-right-color: var(--pixel-border-light); 
+            border-bottom-color: var(--pixel-border-light); 
+            background: var(--tg-secondary-bg); 
+            padding: 15px; 
+            margin-bottom: 15px; 
+            box-shadow: inset 1px 1px 0px 0px rgba(0,0,0,0.1); /* Subtle inner shadow for depth */
+        }
+        
+        /* Header Styling */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 5px 0; /* Add some padding to header area */
+        }
+        .header .app-title-tagline {
+            flex-grow: 1;
+        }
+        .header .app-title-tagline h1 { 
+            font-size: 28px; 
+            margin: 0; 
+            margin-bottom: 5px; /* Space below title */
+            color: var(--accent-yellow); /* Title color */
+            text-shadow: 2px 2px 0px var(--pixel-border-dark); /* Pixel art text shadow */
+        } 
+        .header .app-title-tagline p { 
+            font-size: 18px; 
+            color: var(--tg-hint); 
+            margin: 0; 
+        }
+
+        .header .top-right-nav {
+            display: flex;
+            gap: 15px; /* Spacing between icons */
+            align-items: center;
+        }
+        .header-icon-button {
+            background: none;
+            border: none;
+            color: var(--tg-text);
+            font-family: 'VT323', monospace; 
+            font-size: 24px; /* Icon size */
+            cursor: pointer;
+            padding: 5px; /* Padding around the icon itself */
+            position: relative; /* For badge positioning */
+            filter: drop-shadow(0 0 2px var(--tg-text)); /* Subtle glow */
+            transition: all 0.1s ease-in-out;
+        }
+        .header-icon-button:hover:not(.active) {
+            filter: drop-shadow(0 0 5px var(--tg-button)); /* Brighter glow on hover */
+            transform: translateY(-2px); /* Slight lift */
+        }
+        .header-icon-button:active {
+            transform: scale(0.95) translateY(0); /* Pressed effect */
+            filter: drop-shadow(0 0 1px var(--tg-hint)); /* Dim glow on press */
+        }
+        .header-icon-button.active {
+            filter: drop-shadow(0 0 5px var(--tg-button)); /* Keep active glow */
+        }
+        .header-icon-button .notification-badge {
+            position: absolute;
+            top: -8px; 
+            right: -8px; 
+            background-color: var(--notification-badge-bg);
+            color: var(--notification-badge-text);
+            border-radius: 50%;
+            padding: 2px 6px;
+            font-size: 10px;
+            font-weight: bold;
+            min-width: 18px;
+            text-align: center;
+            box-sizing: border-box;
+            display: none; 
+            border: 1px solid var(--notification-badge-text); 
+            animation: pulse 1.5s infinite; 
+        }
+        
+        /* Balance Card Specifics */
+        .balance-card h2 { margin: 0 0 10px 0; font-size: 18px; color: var(--tg-hint); } 
+        .balance-card .balance-amount { 
+            font-size: 42px; 
+            color: var(--accent-yellow); 
+            text-shadow: 2px 2px 0px var(--pixel-border-dark); 
+        }
+        
+        /* List Styles (Tasks, Withdrawals, Notifications) */
+        .list { list-style: none; padding: 0; margin: 0; }
+        .list-item { 
+            border: 3px solid var(--pixel-border-dark); 
+            border-right-color: var(--pixel-border-light); 
+            border-bottom-color: var(--pixel-border-light); 
+            background: var(--tg-bg); 
+            padding: 15px; 
+            margin-bottom: 15px; 
+            box-shadow: 1px 1px 0px 0px rgba(0,0,0,0.1); 
+        }
+        .list-item h3 { margin: 0 0 8px 0; font-size: 20px; color: var(--tg-text); } 
+        .list-item p { margin: 0 0 12px 0; font-size: 16px; color: var(--tg-hint); }
+        
+        /* Button Styling */
+        .button { 
+            padding: 12px; 
+            border: 3px solid var(--pixel-border-dark); 
+            border-right-color: var(--pixel-border-light); 
+            border-bottom-color: var(--pixel-border-light); 
+            background: var(--tg-button); 
+            color: var(--tg-button-text); 
+            font-size: 18px; 
+            font-family: 'VT323', monospace; 
+            cursor: pointer; 
+            text-align: center; 
+            text-decoration: none; 
+            display: block; 
+            width: 100%; 
+            box-sizing: border-box;
+            -webkit-appearance: none; 
+            -moz-appearance: none;
+            appearance: none;
+            transition: all 0.05s linear; 
+        } 
+        .button:hover:not(.disabled) {
+            filter: brightness(1.1); 
+            box-shadow: 2px 2px 0px 0px rgba(0,0,0,0.2); 
+        }
+        .button:active:not(.disabled) { 
+            border-color: var(--pixel-border-light); 
+            border-right-color: var(--pixel-border-dark); 
+            border-bottom-color: var(--pixel-border-dark); 
+            transform: translateY(1px) translateX(1px); 
+            box-shadow: none;
+        }
+        .button.disabled { 
+            background-color: var(--tg-hint); 
+            cursor: not-allowed; 
+            opacity: 0.7; 
+            filter: grayscale(0.5); 
+        }
+
+        /* Stats Grid */
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; } 
+        .stat-card { 
+            border: 3px solid var(--pixel-border-dark); 
+            border-right-color: var(--pixel-border-light); 
+            border-bottom-color: var(--pixel-border-light); 
+            background: var(--tg-bg); 
+            padding: 15px; 
+            text-align: center; 
+            box-shadow: inset 1px 1px 0px 0px rgba(0,0,0,0.1);
+        } 
+        .stat-card .value { font-size: 28px; color: var(--accent-yellow); } 
+        .stat-card .label { font-size: 16px; color: var(--tg-hint); }
+        
+        /* Bottom Navigation Bar */
+        .bottom-nav { 
+            position: fixed; 
+            bottom: 0; 
+            left: 0; 
+            right: 0; 
+            display: flex; 
+            background: var(--tg-secondary-bg); 
+            border-top: 3px solid var(--pixel-border-light); 
+            padding: 5px 0; 
+            z-index: 100; 
+            justify-content: space-around; 
+        }
+        .nav-item { 
+            flex: 1; 
+            text-align: center; 
+            color: var(--tg-hint); 
+            cursor: pointer; 
+            padding: 5px 0; 
+            transition: color 0.2s;
+            max-width: 100px; 
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .nav-item .icon { 
+            font-size: 24px; 
+            line-height: 1;
+            margin-bottom: 2px;
+            text-shadow: 1px 1px 0px rgba(0,0,0,0.5); 
+            /* Default icon color */
+            color: var(--tg-hint); 
+        } 
+        .nav-item.active .icon {
+            color: var(--tg-text); /* Active icon color */
+        }
+        .nav-item .label { 
+            font-size: 12px; 
+            line-height: 1;
+        }
+        .nav-item.active { filter: drop-shadow(0 0 3px var(--tg-button)); color: var(--tg-text); }
+        
+        /* Loading Overlay */
+        .loading-overlay { 
+            position: fixed; 
+            top: 0; left: 0; 
+            width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.7); 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            z-index: 9999; 
+            font-size: 24px; 
+            color: white; 
+            display: none; 
+        }
+        .loading-overlay::after { 
+            content: ' ';
+            display: block;
+            width: 32px;
+            height: 32px;
+            border: 4px solid #fff;
+            border-top-color: var(--accent-yellow);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-top: 10px;
+            image-rendering: pixelated; 
+        }
+        
+        /* Modal Overlay */
+        .modal-overlay { 
+            position: fixed; 
+            top: 0; left: 0; 
+            width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.7); 
+            display: none; 
+            align-items: center; 
+            justify-content: center; 
+            z-index: 1000; 
+            animation: fadeIn 0.3s forwards;
+        }
+        .modal-content { 
+            border: 3px solid var(--pixel-border-dark); 
+            border-right-color: var(--pixel-border-light); 
+            border-bottom-color: var(--pixel-border-light); 
+            background: var(--tg-secondary-bg); 
+            padding: 20px; 
+            width: 90%; 
+            max-width: 400px; 
+            box-sizing: border-box;
+            box-shadow: 5px 5px 0px 0px rgba(0,0,0,0.3); 
+            animation: fadeIn 0.3s forwards;
+        }
+        
+        /* Form Group Styling */
+        .form-group { margin-bottom: 15px; } 
+        .form-group label { display: block; font-size: 18px; margin-bottom: 8px; } 
+        .form-group input, .form-group textarea { 
+            width: 100%; 
+            padding: 10px; 
+            font-size: 18px; 
+            font-family: 'VT323', monospace; 
+            border: 3px solid var(--pixel-border-dark); 
+            background-color: var(--tg-bg); 
+            color: var(--tg-text); 
+            box-sizing: border-box; 
+            -webkit-appearance: none; 
+            -moz-appearance: none;
+            appearance: none;
+            box-shadow: inset 1px 1px 0px 0px rgba(0,0,0,0.2); 
+        }
+        .form-group input:focus, .form-group textarea:focus {
+            outline: none;
+            border-color: var(--tg-button); 
+            box-shadow: inset 1px 1px 0px 0px rgba(0,0,0,0.2), 0 0 5px rgba(66, 165, 245, 0.5); 
+        }
+        
+        /* Toast Notification */
+        .toast { 
+            position: fixed; 
+            bottom: 80px; left: 50%; 
+            transform: translateX(-50%); 
+            background: var(--tg-secondary-bg); 
+            color: var(--tg-text); 
+            padding: 15px; 
+            z-index: 2000; 
+            border: 3px solid var(--pixel-border-light); 
+            font-size: 18px; 
+            animation: toastIn 0.3s forwards, toastOut 0.3s 2.2s forwards; 
+            white-space: nowrap; 
+            box-shadow: 3px 3px 0px 0px rgba(0,0,0,0.3);
+        }
+        
+        /* Withdrawal Item Status Colors */
+        .withdrawal-item .status { float: right; font-weight: 600; font-size: 16px; } 
+        .status-pending { color: var(--accent-yellow); } 
+        .status-approved { color: var(--accent-green); } 
+        .status-rejected { color: var(--accent-red); }
+
+        /* Notification Specific Styles */
+        .notification-item.status-approved {
+            background-color: var(--notification-success-bg);
+            color: var(--notification-text-color);
+            border-color: var(--accent-green);
+        }
+        .notification-item.status-rejected {
+            background-color: var(--notification-danger-bg);
+            color: var(--notification-text-color);
+            border-color: var(--accent-red);
+        }
+        .notification-item h3 {
+            color: var(--notification-text-color); 
+            text-shadow: 1px 1px 0px rgba(0,0,0,0.3);
+        }
+        .notification-item p {
+            color: rgba(255, 255, 255, 0.8); 
+            margin-bottom: 5px;
+        }
+        .notification-item .reason {
+            font-size: 14px;
+            font-style: italic;
+            color: rgba(255, 255, 255, 0.7);
+            margin-top: 5px;
+        }
+        .notification-item .date {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+            margin-top: 5px;
+        }
+        
+        /* Daily Bonus Card Specifics */
+        .daily-bonus-card .progress-bar { 
+            height: 10px; 
+            background-color: var(--tg-bg); 
+            border: 2px solid var(--pixel-border-dark); 
+            margin-top: 10px; 
+            box-shadow: inset 1px 1px 0px 0px rgba(0,0,0,0.2);
+        }
+        .daily-bonus-card .progress-fill { 
+            height: 100%; 
+            width: 0%; 
+            background-color: var(--accent-green); 
+            transition: width 0.5s ease-in-out; 
+            box-shadow: inset -1px -1px 0px 0px rgba(0,0,0,0.2);
+        }
+        
+        /* Task Milestone Card Specifics */
+        .task-milestone-card .milestone-item { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 16px; }
+        .task-milestone-card .milestone-item .reward { color: var(--accent-yellow); }
+        .task-milestone-card .milestone-item .claimed { color: var(--accent-green); }
+        
+        /* Method Selector (GCash/Maya buttons) */
+        .method-selector { display: flex; gap: 10px; } 
+        .method-selector button { 
+            flex-grow: 1; 
+            padding: 12px; 
+            border: 3px solid var(--pixel-border-dark); 
+            background-color: var(--tg-bg); 
+            color: var(--tg-text); 
+            font-size: 18px; 
+            font-family: 'VT323', monospace; 
+            cursor: pointer; 
+            -webkit-appearance: none; 
+            -moz-appearance: none;
+            appearance: none;
+            transition: all 0.05s linear;
+        } 
+        .method-selector button.selected { 
+            background-color: var(--tg-text); 
+            color: var(--tg-bg); 
+            border-right-color: var(--pixel-border-dark); 
+            border-bottom-color: var(--pixel-border-dark);
+            border-left-color: var(--pixel-border-light);
+            border-top-color: var(--pixel-border-light);
+            box-shadow: inset 1px 1px 0px 0px rgba(0,0,0,0.2);
+        }
+        .method-selector button:active {
+            border-color: var(--pixel-border-light);
+            border-right-color: var(--pixel-border-dark);
+            border-bottom-color: var(--pixel-border-dark);
+            transform: translateY(1px) translateX(1px);
+        }
+
+        /* Withdrawal Maintenance Overlay */
+        .withdrawal-maintenance-overlay { 
+            position: absolute; 
+            top: 0; left: 0; 
+            width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.8); 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            z-index: 10; 
+            color: white; 
+            text-align: center; 
+            font-size: 20px; 
+            display: none; 
+        }
+
+        /* Redeem Code UI - Improved */
+        .redeem-code-container h3 {
+            margin-top: 0;
+            margin-bottom: 10px; 
+            font-size: 20px;
+            color: var(--tg-text); 
+            text-align: left; 
+        }
+
+        .redeem-code-container p.description {
+            font-size: 16px; 
+            line-height: 1.5; 
+            color: var(--tg-hint); 
+            margin-bottom: 15px; 
+            text-align: left; 
+        }
+        
+        .redeem-code-input-wrapper {
+            display: flex;
+            gap: 0; 
+            align-items: stretch; 
+            margin-top: 0; 
+        }
+
+        .pixel-input-recessed {
+            flex-grow: 1; 
+            margin: 0; 
+            padding: 10px; 
+            font-size: 18px; 
+            font-family: 'VT323', monospace; 
+            box-sizing: border-box; 
+            background-color: var(--pixel-input-bg); 
+            color: var(--pixel-input-text); 
+            outline: none; 
+
+            border: 3px solid var(--pixel-border-light); 
+            border-right-color: var(--pixel-border-dark); 
+            border-bottom-color: var(--pixel-border-dark); 
+            
+            box-shadow: inset 1px 1px 0px 0px rgba(0,0,0,0.2); 
+            -webkit-appearance: none; 
+            -moz-appearance: none;
+            appearance: none;
+        }
+        .pixel-input-recessed:focus {
+            border-color: var(--tg-button); 
+            border-right-color: var(--pixel-border-dark);
+            border-bottom-color: var(--pixel-border-dark);
+            box-shadow: inset 1px 1px 0px 0px rgba(0,0,0,0.2), 0 0 5px rgba(66, 165, 245, 0.5);
+        }
+
+        .redeem-code-input-wrapper .button-inline { /* Custom class for inline button */
+            width: auto; 
+            padding: 10px 15px; 
+            flex-shrink: 0; 
+            display: inline-block; 
+            /* Match standard button raised effect */
+            border: 3px solid var(--pixel-border-dark); 
+            border-right-color: var(--pixel-border-light); 
+            border-bottom-color: var(--pixel-border-light);
+            /* Connect seamlessly with input */
+            border-left: none; 
+            margin-left: -3px; 
+            position: relative; 
+            z-index: 1; 
+            background: var(--tg-button); 
+            color: var(--tg-button-text); 
+            font-size: 18px; 
+            font-family: 'VT323', monospace; 
+            cursor: pointer; 
+            text-align: center; 
+            text-decoration: none;
+            box-sizing: border-box;
+            -webkit-appearance: none; 
+            -moz-appearance: none;
+            appearance: none;
+            transition: all 0.05s linear;
+        }
+
+        /* Ensure .button-inline:active works correctly */
+        .redeem-code-input-wrapper .button-inline:hover:not(.disabled) {
+            filter: brightness(1.1);
+            box-shadow: 2px 2px 0px 0px rgba(0,0,0,0.2);
+        }
+        .redeem-code-input-wrapper .button-inline:active:not(.disabled) {
+            border-color: var(--pixel-border-light);
+            border-right-color: var(--pixel-border-dark);
+            border-bottom-color: var(--pixel-border-dark);
+            border-left-color: var(--pixel-border-dark); 
+            transform: translateY(1px) translateX(1px);
+            box-shadow: none;
+        }
+
+        /* Footer for Copyright */
+        .app-footer {
+            margin-top: 30px;
+            text-align: center;
+            font-size: 14px;
+            color: var(--tg-hint);
+        }
+        .app-footer a {
+            color: var(--tg-button);
+            text-decoration: none;
+            margin: 0 5px;
+        }
+        .app-footer a:hover {
+            text-decoration: underline;
+        }
+
+        /* Custom Pixel Icons for Navigation (Bottom Bar) */
+        .nav-item .icon-custom-home::before { content: '首页'; } /* Home in Chinese */
+        .nav-item .icon-custom-tasks::before { content: '任务'; } /* Tasks/Quest in Chinese */
+        .nav-item .icon-custom-refer::before { content: '推荐'; } /* Refer/Ally in Chinese */
+        .nav-item .icon-custom-gift::before { content: '宝藏'; } /* Gift/Treasure in Chinese */
+
+        /* Custom Pixel Icons for Header (Top-Right) */
+        .header-icon-button .icon-custom-notifications::before { content: 'NOTIF'; font-size: 18px;} /* Notifications (English) */
+        .header-icon-button .icon-custom-profile::before { content: 'PROFILE'; font-size: 18px;} /* Profile (English) */
+
+    </style>
+</head>
+<body>
+
+    <!-- Loading Overlay -->
+    <div id="loading" class="loading-overlay" style="display: flex;">Loading Xewee...</div>
+
+    <!-- Home View -->
+    <div id="homeView" class="app-view active">
+        <div class="header"> 
+            <div class="app-title-tagline">
+                <h1 id="welcome-message">Xewee</h1> 
+                <p>Unleash Your Earning Potential!</p> <!-- Professional tagline -->
+            </div>
+            <div class="top-right-nav">
+                <button type="button" id="navNotificationsHeader" class="header-icon-button" onclick="showView('notificationsView')">
+                    <span class="icon-custom-notifications"></span><span id="unreadNotifications" class="notification-badge" style="display:none;">0</span>
+                </button>
+                <button type="button" id="navProfileHeader" class="header-icon-button" onclick="showView('profileView')">
+                    <span class="icon-custom-profile"></span>
+                </button>
+            </div>
+        </div>
+        <div class="pixel-container balance-card"> <h2>Balance</h2> <p id="balanceAmount" class="balance-amount">P--.--</p> </div>
+        <div class="pixel-container daily-bonus-card">
+            <h3>Daily Login Bonus</h3>
+            <p id="dailyBonusStatus" style="font-size: 16px; margin-bottom: 10px; color: var(--tg-hint);">Loading...</p>
+            <div class="progress-bar"><div id="dailyBonusProgress" class="progress-fill"></div></div>
+            <button type="button" id="claimDailyBonusBtn" class="button" style="margin-top: 15px;">Claim Bonus (P10.00)</button>
+        </div>
+        <div class="pixel-container announcement-card"> 
+            <h3>Announcements</h3> 
+            <p id="announcementText">Loading latest news...</p> 
+        </div>
+        
+        <!-- New: FAQ and News Channel section on Home View -->
+        <div class="pixel-container">
+            <h3>Need Help or News?</h3>
+            <p style="font-size: 16px; margin-bottom: 10px;">Find answers to common questions or stay updated with Xewee news!</p>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <button type="button" class="button" onclick="showView('faqView')" style="flex:1; min-width: 120px; background: var(--pixel-border-dark); color: var(--tg-text);">FAQ</button>
+                <a href="https://t.me/XeweeNews" target="_blank" class="button" style="flex:1; min-width: 120px; background: var(--accent-green); color: var(--pixel-border-dark);">News Channel</a>
+            </div>
+        </div>
+
+        <div class="app-footer">
+            Copyright &copy; 2025 Xewee. All Rights Reserved. | 
+            <button type="button" style="background: none; border: none; color: var(--tg-button); font-family: 'VT323', monospace; font-size: 14px; cursor: pointer; padding: 0; margin: 0 5px;" onclick="showView('privacyPolicyView')">Privacy Policy</button> | 
+            <button type="button" style="background: none; border: none; color: var(--tg-button); font-family: 'VT323', monospace; font-size: 14px; cursor: pointer; padding: 0; margin: 0 5px;" onclick="showView('termsOfServiceView')">Terms of Service</button>
+        </div>
+    </div>
+
+    <!-- Tasks View -->
+    <div id="tasksView" class="app-view">
+        <div class="header"> <h1>Task Board</h1> </div>
+        <ul id="taskList" class="list"></ul>
+    </div>
+
+    <!-- Referrals View -->
+    <div id="referralView" class="app-view">
+        <div class="header"> <h1>Recruit Friends</h1> </div>
+        <div class="stats-grid">
+            <div class="stat-card"> <div id="referralCount" class="value">0</div> <div class="label">Friends Recruited</div> </div>
+            <div class="stat-card"> <div id="successfulReferralCount" class="value">0</div> <div class="label">Successful Quests</div> </div>
+        </div>
+        <br>
+        <div class="pixel-container">
+            <h3>Your Unique Code</h3>
+            <p style="font-size: 16px; line-height: 1.5;">Share this code. For every friend who joins and completes a task, you earn a <strong>10% commission</strong> based on the task's reward!</p>
+            <!-- Referral Tier System can be added here with more backend data -->
+            <div id="referralLink" style="background: var(--tg-bg); padding: 10px; word-wrap: break-word; font-size: 14px; margin: 15px 0; border: 2px inset var(--pixel-border-dark);"></div>
+            <button type="button" id="copyLinkBtn" class="button">Copy Code</button>
+        </div>
+    </div>
+    
+    <!-- Gift View -->
+    <div id="giftView" class="app-view">
+        <div class="header"> <h1>Gift Treasury</h1> </div>
+        <div class="pixel-container">
+            <h3>Your Gift Tickets</h3>
+            <div style="text-align: center; margin-bottom: 20px;">
+                <span id="giftTicketCount" style="font-size: 42px; color: var(--accent-yellow);">0</span>
+                <p style="color: var(--tg-hint); font-size: 16px; margin-top: 5px;">Tickets Available</p>
+            </div>
+            <button type="button" id="buyTicketBtn" class="button" style="background: var(--accent-green); color: var(--pixel-border-dark);">Buy Tickets (P10.00)</button>
+        </div>
+        <div class="pixel-container">
+            <h3>Send a Gift</h3>
+            <p style="font-size: 16px; line-height: 1.5;">Uses 1 Ticket. A 5% fee applies to the sent amount from your balance. Min: P30.00</p>
+            <form id="giftForm">
+                <div class="form-group"><label for="giftRecipientId">Recipient User ID</label><input type="number" id="giftRecipientId" placeholder="e.g., 123456789" required></div>
+                <div class="form-group"><label for="giftAmount">Amount</label><input type="number" id="giftAmount" placeholder="e.g., 500" required></div>
+                <button type="submit" class="button">Send Gift</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Notifications View -->
+    <div id="notificationsView" class="app-view">
+        <div class="header" style="justify-content: flex-start; gap: 10px;"> 
+            <h1>Notifications</h1> 
+            <button type="button" id="markAllReadBtn" class="button" style="width: auto; padding: 8px 12px; font-size: 16px; margin: 0; background: var(--pixel-border-dark); color: var(--tg-text);">Mark All As Read</button>
+        </div>
+        <ul id="notificationList" class="list"></ul>
+    </div>
+
+    <!-- Profile View (Now Accessible from Header) -->
+    <div id="profileView" class="app-view">
+        <div class="header"> <h1>Profile Info</h1> </div> <!-- Changed to Profile Info -->
+        <div class="pixel-container">
+            <p id="profileName" style="font-size: 18px;">Player: ...</p>
+            <p id="profileId" style="font-size: 14px; color: var(--tg-hint);">ID: ...</p>
+            <p id="tasksCompleted" style="font-size: 14px; color: var(--tg-hint);">Tasks Completed: 0</p>
+        </div>
+        <div class="pixel-container task-milestone-card">
+            <h3>Task Milestones</h3>
+            <div id="taskMilestonesList"></div>
+        </div>
+        <div class="pixel-container redeem-code-container">
+            <h3>Redeem Code</h3>
+            <p class="description">Enter your special code to claim rewards!</p>
+            <div class="redeem-code-input-wrapper">
+                <input id="redeemCodeInput" type="text" placeholder="Enter Code" class="pixel-input-recessed">
+                <button type="button" id="redeemCodeBtn" class="button-inline">OK</button>
+            </div>
+        </div>
+        <div class="pixel-container" style="position: relative;">
+            <div id="withdrawalMaintenanceOverlay" class="withdrawal-maintenance-overlay" style="display:none;">WITHDRAWAL<br>MAINTENANCE</div>
+            <h3>Withdraw Funds</h3>
+            <p style="font-size: 16px; line-height: 1.5;"><span id="minWithdrawalText">Min: P300.00</span>, <span id="maxWithdrawalText">Max: P30000.00</span></p>
+            <form id="withdrawForm">
+                <div class="form-group"><label for="withdrawAmount">Amount</label><input type="number" id="withdrawAmount" placeholder="e.g., 500" required></div>
+                <div class="form-group"><label>Method</label><div class="method-selector"><button type="button" id="gcashBtn">GCASH</button><button type="button" id="mayaBtn">MAYA</button></div></div>
+                <div class="form-group"><label for="withdrawDetails">Account Number</label><input type="tel" id="withdrawDetails" placeholder="Your GCash/Maya number" required></div>
+                <p id="withdrawalFeeText" style="font-size: 14px; color: var(--tg-hint); text-align: center; display: none;"></p>
+                <button type="submit" class="button" style="background: var(--accent-red); color: var(--tg-button-text); margin-top: 10px;">Submit Withdrawal</button>
+            </form>
+        </div>
+        <div class="pixel-container">
+            <h3>Withdrawal History</h3>
+            <ul id="withdrawalList" class="list" style="max-height: 150px; overflow-y: auto;"></ul>
+        </div>
+    </div>
+
+    <!-- New: FAQ View -->
+    <div id="faqView" class="app-view">
+        <div class="header"><h1>Frequently Asked Questions</h1></div>
+        <div class="pixel-container">
+            <h3>What is Xewee?</h3>
+            <p>Xewee is a task-based reward platform on Telegram where you can earn rewards by completing various tasks given by admins.</p>
+        </div>
+        <div class="pixel-container">
+            <h3>How do I earn?</h3>
+            <p>Complete tasks listed on the "Tasks" board. Each task has a specific reward. You can also earn commissions by referring friends!</p>
+        </div>
+        <div class="pixel-container">
+            <h3>What are Gift Tickets?</h3>
+            <p>Gift Tickets allow you to send earned balance to other Xewee players. A small fee applies to the sent amount.</p>
+        </div>
+        <div class="pixel-container">
+            <h3>How do I withdraw my earnings?</h3>
+            <p>Go to the "Profile" section, enter your desired withdrawal amount, select your method (GCash/Maya), and provide your account number. A fee applies, and withdrawals are subject to review.</p>
+        </div>
+        <div style="text-align: center; margin-top: 20px;">
+            <button type="button" class="button" onclick="showView('homeView')" style="width: auto; padding: 10px 20px;">Back to Home</button>
+        </div>
+    </div>
+
+    <!-- New: Privacy Policy View -->
+    <div id="privacyPolicyView" class="app-view">
+        <div class="header"><h1>Privacy Policy</h1></div>
+        <div class="pixel-container">
+            <p>Your privacy is important to us. Xewee collects minimal user data (Telegram User ID, First Name) necessary for operating the platform, managing balances, tasks, and referrals.</p>
+            <p>We do not share your personal data with third parties without your explicit consent. All data is securely stored and used only for the functionality of the Xewee platform.</p>
+            <p>By using Xewee, you agree to this Privacy Policy. We may update this policy from time to time.</p>
+        </div>
+        <div style="text-align: center; margin-top: 20px;">
+            <button type="button" class="button" onclick="showView('homeView')" style="width: auto; padding: 10px 20px;">Back to Home</button>
+        </div>
+    </div>
+
+    <!-- New: Terms of Service View -->
+    <div id="termsOfServiceView" class="app-view">
+        <div class="header"><h1>Terms of Service</h1></div>
+        <div class="pixel-container">
+            <p>By using Xewee, you agree to these Terms of Service.</p>
+            <p>1. **Eligibility:** You must be at least 18 years old to use Xewee. Xewee is for entertainment purposes only and does not offer real money gambling.</p>
+            <p>2. **Fair Play:** Any attempt to defraud, exploit bugs, or manipulate the system for unfair advantage will result in account suspension or permanent ban without warning and forfeiture of all earnings.</p>
+            <p>3. **Withdrawals:** Withdrawals are processed after manual review and are subject to minimum/maximum amounts and fees. Xewee reserves the right to reject withdrawals for suspicious activity.</p>
+            <p>4. **Account Termination:** Xewee reserves the right to terminate accounts, revoke earnings, or modify services at its sole discretion without prior notice.</p>
+            <p>5. **Changes:** These Terms may be updated periodically. Your continued use signifies acceptance of the new terms.</p>
+            <p>This is an extreme parody game made for responsible adults. No purchase is necessary. Buying stuff is totally optional and doesn’t guarantee rewards.</p>
+        </div>
+        <div style="text-align: center; margin-top: 20px;">
+            <button type="button" class="button" onclick="showView('homeView')" style="width: auto; padding: 10px 20px;">Back to Home</button>
+        </div>
+    </div>
+
+    <!-- Task Submission Modal -->
+    <div id="taskModal" class="modal-overlay">
+        <div class="modal-content">
+            <h2 id="taskModalTitle" style="font-size: 20px;">Submit Proof</h2>
+            <form id="taskProofForm">
+                <div class="form-group"><label for="taskProofText">Note (Optional)</label><textarea id="taskProofText" rows="2"></textarea></div>
+                <div class="form-group"><label for="taskProofPhoto">Upload Image Proof</label><input type="file" id="taskProofPhoto" accept="image/*" required></div>
+                <div style="display: flex; gap: 10px;"><button type="button" id="cancelSubmitBtn" class="button" style="background: var(--tg-hint); flex:1;">Cancel</button><button type="submit" class="button" style="background: var(--accent-green); color: var(--pixel-border-dark); flex:1;">Submit</button></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Bottom Navigation Bar (4 Buttons Only) -->
+    <nav class="bottom-nav">
+        <div id="navHome" class="nav-item active" onclick="showView('homeView')"> <span class="icon-custom-home icon"></span> <div class="label">Home</div> </div>
+        <div id="navTasks" class="nav-item" onclick="showView('tasksView')"> <span class="icon-custom-tasks icon"></span> <div class="label">Tasks</div> </div>
+        <div id="navReferral" class="nav-item" onclick="showView('referralView')"> <span class="icon-custom-refer icon"></span> <div class="label">Refer</div> </div>
+        <div id="navGift" class="nav-item" onclick="showView('giftView')"> <span class="icon-custom-gift icon"></span> <div class="label">Gift</div> </div>
+    </nav>
+    
+    <!-- Embedded JavaScript Logic -->
+    <script>
+        // Initialize Telegram WebApp
+        const tg = window.Telegram.WebApp; 
+        tg.ready(); 
+        tg.expand();
+
+        // Dynamically set Telegram theme colors for better integration
+        document.documentElement.style.setProperty('--tg-bg', tg.themeParams.bg_color || '#212121');
+        document.documentElement.style.setProperty('--tg-text', tg.themeParams.text_color || '#eeeeee');
+        document.documentElement.style.setProperty('--tg-hint', tg.themeParams.hint_color || '#9e9e9e');
+        document.documentElement.style.setProperty('--tg-button', tg.themeParams.button_color || '#42a5f5');
+        document.documentElement.style.setProperty('--tg-button-text', tg.themeParams.button_text_color || '#ffffff');
+        document.documentElement.style.setProperty('--tg-secondary-bg', tg.themeParams.secondary_bg_color || '#303030');
+
+        // --- Configuration (UPDATE THESE!) ---
+        // Normalize API_BASE_URL to ensure no trailing slash.
+        // IMPORTANT: Replace with your Railway backend URL!
+        const rawApiBaseUrl = "https://web-production-078c8.up.railway.app"; 
+        const API_BASE_URL = rawApiBaseUrl.endsWith('/') ? rawApiBaseUrl.slice(0, -1) : rawApiBaseUrl; 
+        
+        const BOT_USERNAME = "XeweeBot"; // *** IMPORTANT: REPLACE WITH YOUR BOT'S @USERNAME (without the @) ***
+        // ------------------------------------
+
+        const user = tg.initDataUnsafe.user;
+        const initData = tg.initData;
+
+        let appData = {}; // Stores all initial data fetched from the backend
+        let withdrawalMethod = ''; // To track selected withdrawal method (GCash/Maya)
+        
+        // Task Milestones (Matches backend configuration)
+        const TASK_MILESTONES_UI = {10: 50.0, 20: 150.0, 30: 400.0}; 
+
+        // --- Utility Functions ---
+        const views = document.querySelectorAll('.app-view');
+        const bottomNavItems = document.querySelectorAll('.bottom-nav .nav-item'); 
+        const headerIconButtons = document.querySelectorAll('.header-icon-button');
+        
+        function showView(viewId) { 
+            tg.HapticFeedback.impactOccurred('light'); 
+            
+            views.forEach(v => v.classList.remove('active')); 
+            document.getElementById(viewId).classList.add('active'); 
+            
+            // Remove 'active' from all bottom nav items
+            bottomNavItems.forEach(n => n.classList.remove('active')); 
+            // Also remove active styling from header buttons
+            headerIconButtons.forEach(btn => btn.classList.remove('active'));
+
+            // Set active class for bottom nav items
+            const currentBottomNavItem = document.getElementById(`nav${viewId.replace('View', '')}`);
+            if (currentBottomNavItem) {
+                currentBottomNavItem.classList.add('active'); 
+            } else if (viewId === 'notificationsView') {
+                document.getElementById('navNotificationsHeader').classList.add('active');
+            } else if (viewId === 'profileView') {
+                document.getElementById('navProfileHeader').classList.add('active');
+            }
+
+
+            // Special handling for views that need fresh data
+            if (viewId === 'notificationsView') {
+                fetchNotifications();
+            } else if (viewId === 'homeView' || viewId === 'profileView') {
+                fetchInitialData(); 
+            }
+        }
+
+        function showToast(message) { 
+            const existingToast = document.querySelector('.toast');
+            if(existingToast) existingToast.remove(); 
+            const toast = document.createElement('div'); 
+            toast.className = 'toast'; 
+            toast.innerText = message; 
+            document.body.appendChild(toast); 
+            setTimeout(() => { 
+                toast.remove(); 
+            }, 2500); 
+        }
+        
+        // --- API Calls ---
+        async function fetchInitialData() {
+            document.getElementById('loading').style.display = 'flex';
+            try {
+                const url = `${API_BASE_URL}/get_initial_data`;
+                console.log("Fetching initial data from:", url); 
+                const response = await fetch(url, { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({ user_id: user.id, _auth: initData }) 
+                });
+                if (!response.ok) { 
+                    const errorData = await response.json(); 
+                    throw new Error(errorData.detail || `Network response was not ok: ${response.status}`); 
+                }
+                const data = await response.json();
+                if(data.error) { 
+                    tg.showAlert(data.detail || data.error); 
+                    if(data.detail.includes("banned") || data.detail.includes("restricted")){ 
+                        tg.close(); 
+                    } 
+                    return; 
+                }
+                appData = data; 
+                renderAll(); 
+            } catch (error) { 
+                console.error("fetchInitialData error:", error);
+                tg.showAlert(error.message || 'COULD NOT LOAD DATA. PLEASE RESTART.'); 
+            } finally { 
+                document.getElementById('loading').style.display = 'none'; 
+            }
+        }
+
+        async function fetchNotifications() {
+            document.getElementById('loading').style.display = 'flex';
+            try {
+                const url = `${API_BASE_URL}/get_notifications`;
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ user_id: user.id, _auth: initData })
+                });
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || `Failed to fetch notifications: ${response.status}`);
+                }
+                const notifications = await response.json();
+                renderNotifications(notifications);
+                
+                // Update notification badge (assuming 'is_read' field or status determines unread)
+                // You'll need to update your backend to return `is_read` status for notifications
+                // For now, let's just count total non-pending notifications
+                const unreadCount = notifications.filter(n => n.status !== 'read' /* Placeholder for backend 'read' status */).length; 
+                const notificationBadge = document.getElementById('unreadNotifications');
+                if (unreadCount > 0) {
+                    notificationBadge.innerText = unreadCount;
+                    notificationBadge.style.display = 'block';
+                } else {
+                    notificationBadge.style.display = 'none';
+                }
+
+            } catch (error) {
+                console.error("fetchNotifications error:", error);
+                tg.showAlert(error.message || 'Could not load notifications.');
+            } finally { 
+                document.getElementById('loading').style.display = 'none'; 
+            }
+        }
+
+        async function markAllNotificationsAsRead() {
+            tg.HapticFeedback.impactOccurred('light');
+            tg.showConfirm('Mark all notifications as read?', async (ok) => {
+                if (ok) {
+                    document.getElementById('loading').style.display = 'flex';
+                    try {
+                        // This endpoint needs to be implemented in main.py
+                        const url = `${API_BASE_URL}/mark_notifications_as_read`; 
+                        const response = await fetch(url, {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ user_id: user.id, _auth: initData })
+                        });
+                        if (!response.ok) {
+                            const errorData = await response.json();
+                            throw new Error(errorData.detail || 'Failed to mark notifications as read.');
+                        }
+                        showToast('All notifications marked as read!');
+                        fetchNotifications(); 
+                        document.getElementById('unreadNotifications').style.display = 'none'; 
+                    } catch (error) {
+                        console.error("Mark all as read error:", error);
+                        tg.showAlert(error.message || 'Failed to mark notifications as read.');
+                    } finally {
+                        document.getElementById('loading').style.display = 'none';
+                    }
+                }
+            });
+        }
+
+        // --- UI Rendering ---
+        function renderAll(){
+            document.getElementById('balanceAmount').innerText = `P${(appData.balance || 0).toFixed(2)}`;
+            document.getElementById('announcementText').innerText = appData.announcement || "Welcome! No new announcements.";
+            
+            const claimBtn = document.getElementById('claimDailyBonusBtn'); 
+            const dailyBonusStatus = document.getElementById('dailyBonusStatus'); 
+            const dailyBonusProgress = document.getElementById('dailyBonusProgress');
+            const dailyBonusAmount = appData.daily_bonus_amount || 10.0; 
+
+            if (appData.can_claim_daily) { 
+                claimBtn.classList.remove('disabled'); 
+                claimBtn.innerText = `Claim Bonus (P${dailyBonusAmount.toFixed(2)})`; 
+                dailyBonusStatus.innerText = 'Ready to Claim!'; 
+                dailyBonusProgress.style.width = '100%'; 
+            } else { 
+                claimBtn.classList.add('disabled'); 
+                const invitesNeeded = Math.max(0, appData.daily_bonus_req - appData.daily_claim_invites); 
+                claimBtn.innerText = `Invite ${invitesNeeded} more!`; 
+                dailyBonusStatus.innerText = `Invites: ${appData.daily_claim_invites}/${appData.daily_bonus_req} (Needed for tomorrow)`; 
+                dailyBonusProgress.style.width = `${(appData.daily_claim_invites / appData.daily_bonus_req) * 100}%`; 
+            }
+
+            const taskList = document.getElementById('taskList'); 
+            taskList.innerHTML = '';
+            if (appData.tasks && appData.tasks.length > 0) { 
+                appData.tasks.forEach(task => { 
+                    const li = document.createElement('li'); 
+                    li.className = 'list-item'; 
+                    li.innerHTML = `
+                        <h3>${task.description}</h3>
+                        <p>REWARD: P${task.reward.toFixed(2)}</p>
+                        <div style="display:flex; gap: 10px; margin-top: 15px;">
+                            <a href="${task.link}" target="_blank" class="button" style="flex:1;">Visit Link</a>
+                            <button type="button" class="button submit-proof-btn" data-task-id="${task.id}" style="flex:1; background: var(--accent-green); color: var(--pixel-border-dark);">Submit Proof</button>
+                        </div>
+                    `; 
+                    taskList.appendChild(li); 
+                }); 
+            } else { 
+                taskList.innerHTML = '<li class="pixel-container"><p>No tasks available. Check back later!</p></li>'; 
+            }
+
+            document.getElementById('referralCount').innerText = appData.referral_count || 0;
+            document.getElementById('successfulReferralCount').innerText = appData.successful_referrals || 0;
+            document.getElementById('referralLink').innerText = `https://t.me/${BOT_USERNAME}?start=${user.id}`;
+
+            document.getElementById('profileName').innerText = `Player: ${user.first_name || 'Unknown'}`;
+            document.getElementById('profileId').innerText = `ID: ${user.id}`;
+            document.getElementById('tasksCompleted').innerText = `Tasks Completed: ${appData.tasks_completed || 0}`;
+            
+            const milestonesList = document.getElementById('taskMilestonesList'); 
+            milestonesList.innerHTML = ''; 
+            const claimedMilestones = appData.claimed_milestones || {};
+            for (const milestoneKey in TASK_MILESTONES_UI) { 
+                const count = parseInt(milestoneKey); 
+                const reward = TASK_MILESTONES_UI[milestoneKey]; 
+                const backendMilestoneKey = `${count}_tasks`; 
+                const isClaimed = claimedMilestones[backendMilestoneKey]; 
+                const currentStatus = (appData.tasks_completed >= count) ? (isClaimed ? 'CLAIMED' : 'READY') : 'PENDING'; 
+                const statusColor = isClaimed ? 'var(--accent-green)' : (appData.tasks_completed >= count ? 'var(--accent-yellow)' : 'var(--tg-hint)'); 
+                const item = document.createElement('div'); 
+                item.className = 'milestone-item'; 
+                item.innerHTML = `<span>${count} Tasks:</span><span style="color: ${statusColor};">P${reward.toFixed(2)} (${currentStatus})</span>`; 
+                milestonesList.appendChild(item); 
+            }
+            
+            document.getElementById('minWithdrawalText').innerText = `Min: P${(appData.min_withdrawal || 300).toFixed(2)}`;
+            document.getElementById('maxWithdrawalText').innerText = `Max: P${(appData.max_withdrawal || 30000).toFixed(2)}`;
+            
+            const withdrawalList = document.getElementById('withdrawalList'); 
+            withdrawalList.innerHTML = '';
+            if (appData.withdrawals && appData.withdrawals.length > 0) { 
+                appData.withdrawals.forEach(w => { 
+                    const item = document.createElement('li'); 
+                    item.className = 'list-item withdrawal-item'; 
+                    item.innerHTML = `<span>P${w.amount.toFixed(2)} (${w.method}) on ${w.date}</span><span class="status status-${w.status}">${w.status.toUpperCase()}</span>`; 
+                    withdrawalList.appendChild(item); 
+                }); 
+            } else { 
+                withdrawalList.innerHTML = '<li class="pixel-container"><p>No withdrawal history.</p></li>'; 
+            }
+            
+            if (appData.withdrawal_maintenance) { 
+                document.getElementById('withdrawalMaintenanceOverlay').style.display = 'flex'; 
+            } else { 
+                document.getElementById('withdrawalMaintenanceOverlay').style.display = 'none'; 
+            }
+
+            document.getElementById('giftTicketCount').innerText = appData.gift_tickets || 0;
+            document.getElementById('buyTicketBtn').innerText = `Buy Tickets (P${(appData.gift_ticket_price || 10.00).toFixed(2)})`;
+            document.querySelector('#giftView .pixel-container p').innerHTML = `Uses 1 Ticket. A ${((appData.gift_fee_percent || 0.05)*100).toFixed(0)}% fee applies to the sent amount from your balance. Min: P${(appData.gift_min_amount || 30.00).toFixed(2)}`;
+
+            fetchNotifications(); 
+        }
+
+        function renderNotifications(notifications) {
+            const notificationList = document.getElementById('notificationList');
+            notificationList.innerHTML = ''; 
+
+            if (!notifications || notifications.length === 0) {
+                notificationList.innerHTML = '<li class="pixel-container"><p>No new notifications.</p></li>';
+                return;
+            }
+
+            notifications.forEach(notif => {
+                const li = document.createElement('li');
+                li.className = `list-item notification-item status-${notif.status}`;
+                
+                let detailsHtml = '';
+                if (notif.type === 'task_submission') {
+                    detailsHtml = `
+                        <h3>Task: ${notif.description}</h3>
+                        <p>Reward: P${notif.reward.toFixed(2)}</p>
+                    `;
+                } else if (notif.type === 'withdrawal') {
+                    detailsHtml = `
+                        <h3>Withdrawal: P${notif.amount.toFixed(2)}</h3>
+                        <p>Method: ${notif.method}</p>
+                    `;
+                }
+
+                if (notif.status === 'rejected' && notif.reason) {
+                    detailsHtml += `<p class="reason">Reason: ${notif.reason}</p>`;
+                }
+                
+                li.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <div>
+                            ${detailsHtml}
+                            <div class="date">${new Date(notif.date).toLocaleDateString()}</div>
+                        </div>
+                        <span class="status status-${notif.status}" style="flex-shrink: 0; margin-left: 10px;">${notif.status.toUpperCase()}</span>
+                    </div>
+                `;
+                notificationList.appendChild(li);
+            });
+        }
+        
+        // --- Event Listeners ---
+        window.addEventListener('load', fetchInitialData); 
+
+        if (user && user.first_name) {
+             document.getElementById('welcome-message').innerText = `Hey, ${user.first_name}!`;
+        }
+
+        document.getElementById('copyLinkBtn').addEventListener('click', () => { 
+            navigator.clipboard.writeText(document.getElementById('referralLink').innerText).then(() => { 
+                tg.HapticFeedback.notificationOccurred('success'); 
+                showToast('Link Copied!'); 
+            }).catch(err => {
+                console.error("Failed to copy text: ", err);
+                tg.showAlert("Failed to copy link. Please try manually.");
+            }); 
+        });
+
+        document.getElementById('claimDailyBonusBtn').addEventListener('click', async () => { 
+            if (document.getElementById('claimDailyBonusBtn').classList.contains('disabled')) { 
+                tg.showAlert("You must meet the invite requirements or wait until tomorrow to claim."); 
+                return; 
+            } 
+            document.getElementById('loading').style.display = 'flex'; 
+            try { 
+                const url = `${API_BASE_URL}/claim_daily_bonus`;
+                const response = await fetch(url, { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({ user_id: user.id, _auth: initData }) 
+                }); 
+                if (!response.ok) { 
+                    const errorData = await response.json(); 
+                    throw new Error(errorData.detail || 'Failed to claim bonus.'); 
+                } 
+                tg.showAlert(`P${(appData.daily_bonus_amount || 10.0).toFixed(2)} has been added to your balance!`); 
+                fetchInitialData(); 
+            } catch (error) { 
+                console.error("Claim daily bonus error:", error);
+                tg.showAlert(error.message || 'Could not claim daily bonus.'); 
+            } finally { 
+                document.getElementById('loading').style.display = 'none'; 
+            } 
+        });
+
+        const taskModal = document.getElementById('taskModal'); 
+        let currentTaskId = null; 
+
+        document.getElementById('taskList').addEventListener('click', e => { 
+            if (e.target.classList.contains('submit-proof-btn')) { 
+                openTaskModal(e.target.getAttribute('data-task-id')); 
+            }
+        });
+
+        function openTaskModal(taskId) { 
+            currentTaskId = taskId; 
+            taskModal.style.display = 'flex'; 
+        }
+
+        document.getElementById('cancelSubmitBtn').addEventListener('click', () => { 
+            taskModal.style.display = 'none'; 
+            document.getElementById('taskProofForm').reset(); 
+        });
+
+        taskModal.addEventListener('click', (e) => { 
+            if (e.target === taskModal) {
+                taskModal.style.display = 'none'; 
+                document.getElementById('taskProofForm').reset(); 
+            }
+        });
+
+        document.getElementById('taskProofForm').addEventListener('submit', async function(e) { 
+            e.preventDefault(); 
+            const text = document.getElementById('taskProofText').value; 
+            const photoInput = document.getElementById('taskProofPhoto'); 
+            
+            if (photoInput.files.length === 0) { 
+                tg.showAlert('Please upload a screenshot.'); 
+                return; 
+            } 
+
+            const reader = new FileReader(); 
+            reader.readAsDataURL(photoInput.files[0]); 
+            
+            reader.onload = async () => { 
+                document.getElementById('loading').style.display = 'flex'; 
+                try { 
+                    const url = `${API_BASE_URL}/submit_task_proof`;
+                    const response = await fetch(url, { 
+                        method: 'POST', 
+                        headers: {'Content-Type': 'application/json'}, 
+                        body: JSON.stringify({ user_id: user.id, _auth: initData, task_id: currentTaskId, text, photo: reader.result }) 
+                    }); 
+                    if (!response.ok) { 
+                        const errorData = await response.json(); 
+                        throw new Error(errorData.detail || 'Submission failed.'); 
+                    } 
+                    tg.showAlert('Proof submitted for review!'); 
+                    taskModal.style.display = 'none'; 
+                    document.getElementById('taskProofForm').reset(); 
+                    fetchInitialData(); 
+                } catch (error) { 
+                    console.error("Task submission error:", error);
+                    tg.showAlert(error.message || 'Submission failed.'); 
+                } finally { 
+                    document.getElementById('loading').style.display = 'none'; 
+                } 
+            }; 
+            reader.onerror = () => { 
+                console.error("Error reading file:", reader.error);
+                tg.showAlert('Error reading file.'); 
+            }; 
+        });
+
+        document.getElementById('redeemCodeBtn').addEventListener('click', async () => { 
+            const code = document.getElementById('redeemCodeInput').value.trim(); 
+            if (!code) { 
+                showToast('Please enter a code.');
+                return; 
+            } 
+            document.getElementById('loading').style.display = 'flex'; 
+            try { 
+                const url = `${API_BASE_URL}/redeem_code`;
+                const response = await fetch(url, { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({ user_id: user.id, _auth: initData, code }) 
+                }); 
+                if (!response.ok) { 
+                    const errorData = await response.json(); 
+                    throw new Error(errorData.detail || 'Invalid code.'); 
+                } 
+                const result = await response.json(); 
+                tg.showAlert(`Success! P${result.amount_rewarded.toFixed(2)} added to your balance.`); 
+                document.getElementById('redeemCodeInput').value = ''; 
+                fetchInitialData(); 
+            } catch (error) { 
+                console.error("Redeem code error:", error);
+                tg.showAlert(error.message || 'Invalid code.'); 
+            } finally { 
+                document.getElementById('loading').style.display = 'none'; 
+            } 
+        });
+
+        document.getElementById('gcashBtn').addEventListener('click', () => { 
+            withdrawalMethod = 'GCash'; 
+            document.getElementById('gcashBtn').classList.add('selected'); 
+            document.getElementById('mayaBtn').classList.remove('selected'); 
+            document.getElementById('withdrawDetails').placeholder = "Your GCash number";
+        }); 
+        document.getElementById('mayaBtn').addEventListener('click', () => { 
+            withdrawalMethod = 'Maya'; 
+            document.getElementById('mayaBtn').classList.add('selected'); 
+            document.getElementById('gcashBtn').classList.remove('selected'); 
+            document.getElementById('withdrawDetails').placeholder = "Your Maya number";
+        });
+
+        document.getElementById('withdrawForm').addEventListener('submit', async function(e) { 
+            e.preventDefault(); 
+            if (appData.withdrawal_maintenance) { 
+                tg.showAlert("Withdrawals are currently under maintenance. Please try again later."); 
+                return; 
+            } 
+            const amount = parseFloat(document.getElementById('withdrawAmount').value); 
+            const details = document.getElementById('withdrawDetails').value.trim(); 
+            
+            const minWithdrawal = appData.min_withdrawal || 300;
+            const maxWithdrawal = appData.max_withdrawal || 30000;
+            const withdrawalFeePercent = appData.withdrawal_fee_percent || 0.03;
+
+            const fee = amount * withdrawalFeePercent; 
+            const totalDeduction = amount + fee; 
+
+            if (isNaN(amount) || amount < minWithdrawal || amount > maxWithdrawal) { 
+                tg.showAlert(`Amount must be between P${minWithdrawal.toFixed(2)} and P${maxWithdrawal.toFixed(2)}.`); 
+                return; 
+            } 
+            if (totalDeduction > appData.balance) { 
+                tg.showAlert('Insufficient balance to cover amount and fee.'); 
+                return; 
+            } 
+            if (!withdrawalMethod) { 
+                tg.showAlert('Please select a withdrawal method (GCash or Maya).'); 
+                return; 
+            } 
+            if (!details) { 
+                tg.showAlert('Please enter your account number.'); 
+                return; 
+            } 
+            
+            document.getElementById('loading').style.display = 'flex'; 
+            try { 
+                const url = `${API_BASE_URL}/submit_withdrawal`;
+                const response = await fetch(url, { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({ user_id: user.id, _auth: initData, amount, method: withdrawalMethod, details }) 
+                }); 
+                if (!response.ok) { 
+                    const errorData = await response.json(); 
+                    throw new Error(errorData.detail || 'Submission failed.'); 
+                } 
+                tg.showAlert('Withdrawal request submitted!'); 
+                fetchInitialData(); 
+                document.getElementById('withdrawForm').reset(); 
+                withdrawalMethod = ''; 
+                document.getElementById('gcashBtn').classList.remove('selected'); 
+                document.getElementById('mayaBtn').classList.remove('selected'); 
+                document.getElementById('withdrawalFeeText').style.display = 'none'; 
+            } catch (error) { 
+                console.error("Submit withdrawal error:", error);
+                tg.showAlert(error.message || 'Withdrawal failed. Please try again.'); 
+            } finally { 
+                document.getElementById('loading').style.display = 'none'; 
+            } 
+        });
+
+        document.getElementById('withdrawAmount').addEventListener('input', (e) => { 
+            const amount = parseFloat(e.target.value) || 0; 
+            const fee = amount * (appData.withdrawal_fee_percent || 0.03); 
+            const feeText = document.getElementById('withdrawalFeeText'); 
+            if(amount > 0) { 
+                feeText.innerText = `Fee: P${fee.toFixed(2)} | Total to deduct: P${(amount + fee).toFixed(2)}`; 
+                feeText.style.display = 'block'; 
+            } else { 
+                feeText.style.display = 'none'; 
+            } 
+        });
+
+        document.getElementById('buyTicketBtn').addEventListener('click', async () => { 
+            const giftTicketPrice = appData.gift_ticket_price || 10.00; 
+            tg.showConfirm(`Buy 1 Gift Ticket for P${giftTicketPrice.toFixed(2)}?`, async (ok) => { 
+                if(ok){ 
+                    document.getElementById('loading').style.display = 'flex'; 
+                    try { 
+                        const url = `${API_BASE_URL}/buy_ticket`;
+                        const response = await fetch(url, { 
+                            method: 'POST', 
+                            headers: {'Content-Type': 'application/json'}, 
+                            body: JSON.stringify({ user_id: user.id, _auth: initData }) 
+                        }); 
+                        if (!response.ok) { 
+                            const errorData = await response.json(); 
+                            throw new Error(errorData.detail || 'Purchase failed.'); 
+                        } 
+                        tg.showAlert("Success! You received 1 Gift Ticket."); 
+                        fetchInitialData(); 
+                    } catch(e) { 
+                        console.error("Buy ticket error:", e);
+                        tg.showAlert(e.message); 
+                    } finally { 
+                        document.getElementById('loading').style.display = 'none'; 
+                    } 
+                } 
+            }); 
+        });
+
+        document.getElementById('giftForm').addEventListener('submit', async function(e) { 
+            e.preventDefault(); 
+            const recipient_id = document.getElementById('giftRecipientId').value.trim(); 
+            const amount = parseFloat(document.getElementById('giftAmount').value); 
+            
+            const giftMinAmount = appData.gift_min_amount || 30.00; 
+            const giftMaxAmount = appData.gift_max_amount || 80000;
+            const giftFeePercent = appData.gift_fee_percent || 0.05;
+
+            if(!recipient_id || isNaN(amount)) { 
+                tg.showAlert("Please fill all fields correctly."); 
+                return; 
+            } 
+            if(appData.gift_tickets < 1) { 
+                tg.showAlert("You do not have any Gift Tickets to use."); 
+                return; 
+            } 
+            if(amount < giftMinAmount || amount > giftMaxAmount) {
+                tg.showAlert(`Gift amount must be between P${giftMinAmount.toFixed(2)} and P${giftMaxAmount.toFixed(2)}.`);
+                return;
+            }
+
+            document.getElementById('loading').style.display = 'flex'; 
+            try { 
+                const url = `${API_BASE_URL}/gift_money`;
+                const response = await fetch(url, { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({ user_id: user.id, _auth: initData, recipient_id: parseInt(recipient_id), amount }) 
+                }); 
+                if (!response.ok) { 
+                    const errorData = await response.json(); 
+                    throw new Error(errorData.detail || 'Gifting failed.'); 
+                } 
+                tg.showAlert("Gift sent successfully!"); 
+                fetchInitialData(); 
+                document.getElementById('giftForm').reset(); 
+            } catch(e) { 
+                console.error("Send gift error:", e);
+                tg.showAlert(e.message); 
+            } finally { 
+                document.getElementById('loading').style.display = 'none'; 
+            } 
+        });
+
+        document.getElementById('markAllReadBtn').addEventListener('click', markAllNotificationsAsRead);
+
+    </script>
+</body>
+</html>
